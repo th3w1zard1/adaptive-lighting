@@ -566,6 +566,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         data = validate(config_entry)
         self._name = data[CONF_NAME]
         self._lights = data[CONF_LIGHTS]
+        self._watched_sensors = data[CONF_WATCHED_SENSORS]
 
         self._detect_non_ha_changes = data[CONF_DETECT_NON_HA_CHANGES]
         self._initial_transition = data[CONF_INITIAL_TRANSITION]
