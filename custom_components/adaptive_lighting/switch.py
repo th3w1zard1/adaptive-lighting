@@ -471,9 +471,9 @@ def color_difference_redmean(
 
 def check_direction_change(last: int, current: int, last_adapt_value: int) -> bool:
     _LOGGER.debug("compare direction: current value %s to last value %s", current, last)
-    if last_adapt_value < last:  # Brightness adapting down
+    if last_adapt_value < last:  # Value adapting down
         return current > last or current < last_adapt_value
-    elif last_adapt_value > last:  # Brightness adapting up
+    elif last_adapt_value > last:  # Value adapting up
         return current < last or current > last_adapt_value
     return False
 
@@ -494,33 +494,34 @@ def _attributes_have_changed(
     ):
         last_brightness = old_attributes[ATTR_BRIGHTNESS]
         current_brightness = new_attributes[ATTR_BRIGHTNESS]
-        if last_adapt_attempt:
-            changed = check_direction_change(
-                last_brightness,
-                current_brightness,
-                last_adapt_attempt[ATTR_BRIGHTNESS],
-            )
-            _LOGGER.debug(
-                "altdetect: Brightness of '%s' changed from %s to %s intended %s with"
-                " context.id='%s' Significant? %s",
-                light,
-                last_brightness,
-                current_brightness,
-                last_adapt_attempt[ATTR_BRIGHTNESS],
-                context.id,
-                changed,
-            )
-            return changed
-        elif abs(current_brightness - last_brightness) > BRIGHTNESS_CHANGE:
-            _LOGGER.debug(
-                "Brightness of '%s' significantly changed from %s to %s with"
-                " context.id='%s'",
-                light,
-                last_brightness,
-                current_brightness,
-                context.id,
-            )
-            return True
+        if abs(current_brightness - last_brightness) > BRIGHTNESS_CHANGE:
+            if last_adapt_attempt:
+                changed = check_direction_change(
+                    last_brightness,
+                    current_brightness,
+                    last_adapt_attempt[ATTR_BRIGHTNESS],
+                )
+                _LOGGER.debug(
+                    "altdetect: Brightness of '%s' changed from %s to %s intended %s with"
+                    " context.id='%s' Significant? %s",
+                    light,
+                    last_brightness,
+                    current_brightness,
+                    last_adapt_attempt[ATTR_BRIGHTNESS],
+                    context.id,
+                    changed,
+                )
+                return changed
+            else:
+                _LOGGER.debug(
+                    "Brightness of '%s' significantly changed from %s to %s with"
+                    " context.id='%s'",
+                    light,
+                    last_brightness,
+                    current_brightness,
+                    context.id,
+                )
+                return True
 
     if (
         adapt_color
@@ -529,33 +530,34 @@ def _attributes_have_changed(
     ):
         last_color_temp = old_attributes[ATTR_COLOR_TEMP_KELVIN]
         current_color_temp = new_attributes[ATTR_COLOR_TEMP_KELVIN]
-        if last_adapt_attempt:
-            changed = check_direction_change(
-                last_color_temp,
-                current_color_temp,
-                last_adapt_attempt[ATTR_COLOR_TEMP_KELVIN],
-            )
-            _LOGGER.debug(
-                "altdetect: Color temperature of '%s' changed from %s to %s intended %s with"
-                " context.id='%s' Significant? %s",
-                light,
-                last_color_temp,
-                current_color_temp,
-                last_adapt_attempt[ATTR_COLOR_TEMP_KELVIN],
-                context.id,
-                changed,
-            )
-            return changed
-        elif abs(current_color_temp - last_color_temp) > COLOR_TEMP_CHANGE:
-            _LOGGER.debug(
-                "Color temperature of '%s' significantly changed from %s to %s with"
-                " context.id='%s'",
-                light,
-                last_color_temp,
-                current_color_temp,
-                context.id,
-            )
-            return True
+        if abs(current_color_temp - last_color_temp) > COLOR_TEMP_CHANGE:
+            if last_adapt_attempt:
+                changed = check_direction_change(
+                    last_color_temp,
+                    current_color_temp,
+                    last_adapt_attempt[ATTR_COLOR_TEMP_KELVIN],
+                )
+                _LOGGER.debug(
+                    "altdetect: Color temperature of '%s' changed from %s to %s intended %s with"
+                    " context.id='%s' Significant? %s",
+                    light,
+                    last_color_temp,
+                    current_color_temp,
+                    last_adapt_attempt[ATTR_COLOR_TEMP_KELVIN],
+                    context.id,
+                    changed,
+                )
+                return changed
+            else:
+                _LOGGER.debug(
+                    "Color temperature of '%s' significantly changed from %s to %s with"
+                    " context.id='%s'",
+                    light,
+                    last_color_temp,
+                    current_color_temp,
+                    context.id,
+                )
+                return True
 
     if (
         adapt_color
