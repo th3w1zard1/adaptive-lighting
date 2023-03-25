@@ -858,8 +858,6 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         self._strict_adapting = data[CONF_STRICT_ADAPTING]
 
         self._detect_non_ha_changes = data[CONF_DETECT_NON_HA_CHANGES]
-        self._dim_to_warm = data[CONF_DIM_TO_WARM]
-
         if not data[CONF_TAKE_OVER_CONTROL] and (
             not data[CONF_STRICT_ADAPTING]
             or data[CONF_ALT_DETECT_METHOD]
@@ -877,6 +875,9 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             self._take_over_control = True
 
         self._autoreset_control_time = data[CONF_AUTORESET_CONTROL]
+
+        self._dim_to_warm = data[CONF_DIM_TO_WARM]
+        self._include_config_in_attributes = data[CONF_INCLUDE_CONFIG_IN_ATTRIBUTES]
 
         self._initial_transition = data[CONF_INITIAL_TRANSITION]
         self._sleep_transition = data[CONF_SLEEP_TRANSITION]
