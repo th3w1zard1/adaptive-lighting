@@ -983,6 +983,16 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         # Set in self._update_attrs_and_maybe_adapt_lights
         self._settings: dict[str, Any] = {}
 
+        self._config: dict[str, Any] = {}
+        if self._include_config_in_attributes:
+            attrdata = deepcopy(data)
+            for k, v in attrdata.items():
+                if isinstance(v, (datetime.date, datetime.datetime)):
+                    attrdata[k] = v.isoformat()
+                if isinstance(v, (datetime.timedelta)):
+                    attrdata[k] = v.total_seconds()
+            self._config.update(attrdata)
+
         # Set and unset tracker in async_turn_on and async_turn_off
         self.remove_listeners = []
         _LOGGER.debug(
@@ -1077,18 +1087,18 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the attributes of the switch."""
+        extra_state_attributes = {"configuration": self._config}
         if not self.is_on:
-            return dict(
-                {key: None for key in self._settings}, configuration=self._config
-            )
-        manual_control = [
+            for key in self._settings:
+                extra_state_attributes[key] = None
+            return extra_state_attributes
+        extra_state_attributes["manual_control"] = [
             light
             for light in self._lights
             if self.turn_on_off_listener.manual_control.get(light)
         ]
-        return dict(
-            self._settings, manual_control=manual_control, configuration=self._config
-        )
+        extra_state_attributes.update(self._settings)
+        return extra_state_attributes
 
     def create_context(
         self, which: str = "default", parent: Context | None = None
