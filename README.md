@@ -168,9 +168,9 @@ And then create adaptive-lighting.yaml and fill it in with your preferences. Her
   detect_non_ha_changes: false
   only_once: false
   ```
-  
+
   You can then create several scripts:
-  
+
   ```
   adaptive_lighting_set_manual_control:
   alias: 'Adaptive Lighting: Set Manual Control'
