@@ -828,12 +828,12 @@ def _attributes_have_changed(
 class AdaptiveSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Adaptive Lighting switch."""
 
-    # Should only contain the settings we want the users to be able to change during runtime.
     def __settings__(
         self,
         data: dict,
         defaults: dict,
     ):
+        # Should only contain the settings we want the users to be able to change during runtime.
         data = validate(
             config_entry=None,
             data=data,
@@ -852,18 +852,11 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 if isinstance(v, (datetime.timedelta)):
                     attrdata[k] = v.total_seconds()
             self._config.update(attrdata)
-        self._lights = data[CONF_LIGHTS]
-
-        for light in data[CONF_LIGHTS]:
-            if not hasattr(self.turn_on_off_listener, "_switches"):
-                self.turn_on_off_listener._switches = {}
-            self.turn_on_off_listener._switches[
-                light
-            ] = self  # light should never be in multiple switches anyway.
 
         self._take_over_control = data[CONF_TAKE_OVER_CONTROL]
         self._alt_detect_method = data[CONF_ALT_DETECT_METHOD]
         self._strict_adapting = data[CONF_STRICT_ADAPTING]
+
         self._detect_non_ha_changes = data[CONF_DETECT_NON_HA_CHANGES]
         self._dim_to_warm = data[CONF_DIM_TO_WARM]
 
@@ -887,7 +880,6 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
 
         self._initial_transition = data[CONF_INITIAL_TRANSITION]
         self._sleep_transition = data[CONF_SLEEP_TRANSITION]
-        self._interval = data[CONF_INTERVAL]
         self._only_once = data[CONF_ONLY_ONCE]
         self._prefer_rgb_color = data[CONF_PREFER_RGB_COLOR]
         self._separate_turn_on_commands = data[CONF_SEPARATE_TURN_ON_COMMANDS]
@@ -923,7 +915,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             transition=data[CONF_TRANSITION],
         )
         _LOGGER.debug(
-            "%s: Changed switch settings for lights '%s'. now using data: '%s'",
+            "%s: Set switch settings for lights '%s'. now using data: '%s'",
             self._name,
             self._lights,
             data,
@@ -950,11 +942,19 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         data = validate(config_entry)
 
         self._name = data[CONF_NAME]
+        self._interval = data[CONF_INTERVAL]
+        self._lights = data[CONF_LIGHTS]
+        for light in data[CONF_LIGHTS]:
+            if not hasattr(self.turn_on_off_listener, "_switches"):
+                self.turn_on_off_listener._switches = {}
+            self.turn_on_off_listener._switches[
+                light
+            ] = self  # light should never be in multiple switches anyway.
 
+        # backup data for use in change_switch_settings "configuration" CONF_USE_DEFAULTS
         self._config: dict[str, Any] = {}
-        self._config_backup = deepcopy(
-            data
-        )  # backup data for use in change_switch_settings "configuration" CONF_USE_DEFAULTS
+        self._config_backup = deepcopy(data)
+
         self.__settings__(
             data=data,
             defaults=None,
