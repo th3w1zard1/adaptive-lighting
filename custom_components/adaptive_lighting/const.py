@@ -5,7 +5,10 @@ from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
-ICON = "mdi:theme-light-dark"
+ICON_MAIN = "mdi:theme-light-dark"
+ICON_BRIGHTNESS = "mdi:brightness-4"
+ICON_COLOR_TEMP = "mdi:sun-thermometer"
+ICON_SLEEP = "mdi:sleep"
 
 DOMAIN = "adaptive_lighting"
 SUN_EVENT_NOON = "solar_noon"
@@ -119,10 +122,11 @@ VALIDATION_TUPLES = [
     (CONF_DETECT_NON_HA_CHANGES, DEFAULT_DETECT_NON_HA_CHANGES, bool),
     (CONF_SEPARATE_TURN_ON_COMMANDS, DEFAULT_SEPARATE_TURN_ON_COMMANDS, bool),
     (CONF_SEND_SPLIT_DELAY, DEFAULT_SEND_SPLIT_DELAY, int_between(0, 10000)),
-    (CONF_ADAPT_DELAY, DEFAULT_ADAPT_DELAY, int_between(0, 10000)),
+    (CONF_ADAPT_DELAY, DEFAULT_ADAPT_DELAY, cv.positive_float),
     (CONF_STRICT_ADAPTING, DEFAULT_STRICT_ADAPTING, bool),
     (CONF_ALT_DETECT_METHOD, DEFAULT_ALT_DETECT_METHOD, bool),
     (CONF_AUTORESET_CONTROL, DEFAULT_AUTORESET_CONTROL, int_between(0, 2147483647)),
+    (CONF_ADAPT_DELAY, DEFAULT_ADAPT_DELAY, cv.positive_float),
 ]
 
 
