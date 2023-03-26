@@ -9,7 +9,8 @@ apply:
           domain: switch
           multiple: false
     lights:
-      description: "entity_id(s) of lights, if not specified, all lights in the switch are selected. example light.bedroom_ceiling"
+      description: entity_id(s) of lights, if not specified, all lights in the switch are selected.
+      example: light.bedroom_ceiling
       selector:
         entity:
           domain: light
@@ -51,8 +52,7 @@ set_manual_control:
           domain: switch
           multiple: false
     lights:
-      description: entity_id(s) of lights, if not specified, all lights in the switch are selected.
-      example: light.bedroom_ceiling
+      description: "entity_id(s) of lights, if not specified, all lights in the switch are selected. example light.bedroom_ceiling"
       selector:
         entity:
           domain: light
