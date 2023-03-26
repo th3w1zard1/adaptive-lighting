@@ -40,6 +40,7 @@ apply:
       example: false
       selector:
         boolean:
+
 set_manual_control:
   description: Mark whether a light is 'manually controlled'.
   fields:
@@ -63,6 +64,7 @@ set_manual_control:
       default: true
       selector:
         boolean:
+
 change_switch_settings:
   description: "Change any settings you'd like in the switch. All options here are the same as in the config flow."
   fields:
