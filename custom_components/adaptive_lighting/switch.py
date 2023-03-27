@@ -987,40 +987,20 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 await self.hass.helpers.entity_component.async_update_entity(light)
                 cur_state = self.hass.states.get(light)
                 brightness = cur_state.attributes[ATTR_BRIGHTNESS]
-                min_ct = (
-                    self._sun_light_settings.min_color_temp
-                )  # pylint: disable=protected-access
-                min_ct = (
-                    self._sun_light_settings.min_color_temp
-                )  # pylint: disable=protected-access
-                max_ct = color_temp_kelvin
-                max_brightness = (
-                    self._sun_light_settings.max_brightness
-                )  # pylint: disable=protected-access
-                min_brightness = (
-                    self._sun_light_settings.min_brightness
-                )  # pylint: disable=protected-access
-                max_brightness = max((max_brightness * 2.55), brightness)
-                min_brightness = min((min_brightness * 2.55), brightness)
-                # min_brightness = attributes["min_brightness"]
-                # max_brightness = attributes["max_brightness"]
+                dim_to_warm_scaling_factor = 1.7
+                mired_at_100_percent = 1e6 / color_temp_kelvin
+                mired_at_0_percent = mired_at_100_percent * dim_to_warm_scaling_factor
+                # Linear interpolation:
+                mired_for_current_brightness = mired_at_0_percent + (
+                    mired_at_100_percent - mired_at_0_percent
+                ) * (brightness / 255)
+                color_temp_kelvin = 1e6 / mired_for_current_brightness
                 _LOGGER.debug(
-                    "Setting color temp using the following values in eq:"
-                    " max_brightness: %s, min_brightness: %s, max_ct: %s,"
-                    " min_ct: %s, brightness: %s",
-                    max_brightness,
-                    min_brightness,
-                    max_ct,
-                    min_ct,
+                    "Setting color temp for lamp %s at brightness %s to color_temp %s",
+                    light,
                     brightness,
+                    color_temp_kelvin,
                 )
-                # y = a(x-h)^2+k where h,k is the vertex (255,6500) or (max_brightness,max_ct)
-                # a = (min_ct-max_ct)/(min_brightness-max_brightness)^2
-                # check: y = (1000-6500)/((1-h)^2)*(x-255)^2+6500 if x=2 then y=1043.221836
-                # ^ when min_brightness=1,max_brightness(h)=255,max_ct=6500,min_ct=1000 ^
-                color_temp_kelvin = (
-                    (min_ct - max_ct) / (min_brightness - max_brightness) ** 2
-                ) * (brightness - max_brightness) ** 2 + max_ct
             service_data[ATTR_COLOR_TEMP_KELVIN] = color_temp_kelvin
         elif "color" in features and adapt_color:
             _LOGGER.debug("%s: Setting rgb_color of light %s", self._name, light)
