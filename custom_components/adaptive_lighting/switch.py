@@ -479,17 +479,19 @@ async def async_setup_entry(
             else:
                 all_lights = _expand_light_groups(this_switch.hass, lights)
             this_switch.turn_on_off_listener.lights.update(all_lights)
-            await this_switch._adapt_lights(  # pylint: disable=protected-access
-                all_lights,
-                data[CONF_TRANSITION],
-                data[ATTR_ADAPT_BRIGHTNESS],
-                data[ATTR_ADAPT_COLOR],
-                data[CONF_PREFER_RGB_COLOR],
-                force=True,
-                context=this_switch.create_context(
-                    "service", parent=service_call.context
-                ),
-            )
+            for light in all_lights:
+                if data[CONF_TURN_ON_LIGHTS] or is_on(hass, light):
+                    await this_switch._adapt_light(  # pylint: disable=protected-access
+                        light,
+                        data[CONF_TRANSITION],
+                        data[ATTR_ADAPT_BRIGHTNESS],
+                        data[ATTR_ADAPT_COLOR],
+                        data[CONF_PREFER_RGB_COLOR],
+                        force=True,
+                        context=this_switch.create_context(
+                            "service", parent=service_call.context
+                        ),
+                    )
 
     @callback
     async def handle_set_manual_control(service_call: ServiceCall):
