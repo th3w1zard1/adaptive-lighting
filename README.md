@@ -1,3 +1,21 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Automatically adapt the brightness and color of lights based on the sun position and take over manual control](#automatically-adapt-the-brightness-and-color-of-lights-based-on-the-sun-position-and-take-over-manual-control)
+    - [New Services](#new-services)
+- [Use cases](#use-cases)
+    - [Options](#options)
+- [Plans/Goals](#plansgoals)
+- [More Background Info](#more-background-info)
+    - [Services](#services)
+  - [Automation examples](#automation-examples)
+  - [Graphs!](#graphs)
+      - [Sun Position:](#sun-position)
+      - [Color Temperature:](#color-temperature)
+      - [Brightness:](#brightness)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
 ![Version](https://img.shields.io/github/v/release/basnijholt/adaptive-lighting?style=for-the-badge)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
