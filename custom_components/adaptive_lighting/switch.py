@@ -100,6 +100,7 @@ from .const import (
     CONF_ADAPT_DELAY,
     CONF_ALT_DETECT_METHOD,
     CONF_DETECT_NON_HA_CHANGES,
+    CONF_DIM_TO_WARM,
     CONF_INCLUDE_CONFIG_IN_ATTRIBUTES,
     CONF_INITIAL_TRANSITION,
     CONF_INTERVAL,
@@ -892,6 +893,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         self._separate_turn_on_commands = data[CONF_SEPARATE_TURN_ON_COMMANDS]
         self._transition = data[CONF_TRANSITION]
         self._adapt_delay = data[CONF_ADAPT_DELAY]
+        self._dim_to_warm = data[CONF_DIM_TO_WARM]
         self._send_split_delay = data[CONF_SEND_SPLIT_DELAY]
         self._take_over_control = data[CONF_TAKE_OVER_CONTROL]
         self._alt_detect_method = data[CONF_ALT_DETECT_METHOD]
