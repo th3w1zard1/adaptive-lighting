@@ -101,6 +101,7 @@ from .const import (
     CONF_ALT_DETECT_METHOD,
     CONF_DETECT_NON_HA_CHANGES,
     CONF_DIM_TO_WARM,
+    CONF_DIM_TO_WARM_BRIGHTNESS_CHECK,
     CONF_INCLUDE_CONFIG_IN_ATTRIBUTES,
     CONF_INITIAL_TRANSITION,
     CONF_INTERVAL,
@@ -894,6 +895,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         self._transition = data[CONF_TRANSITION]
         self._adapt_delay = data[CONF_ADAPT_DELAY]
         self._dim_to_warm = data[CONF_DIM_TO_WARM]
+        self._dim_to_warm_brightness_check = data[CONF_DIM_TO_WARM_BRIGHTNESS_CHECK]
         self._send_split_delay = data[CONF_SEND_SPLIT_DELAY]
         self._take_over_control = data[CONF_TAKE_OVER_CONTROL]
         self._alt_detect_method = data[CONF_ALT_DETECT_METHOD]
@@ -1160,7 +1162,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 min_ct = (
                     self._sun_light_settings.min_color_temp
                 )  # pylint: disable=protected-access
-                max_ct = color_temp_kelvin
+                max_ct = max_kelvin
                 max_brightness = (
                     self._sun_light_settings.max_brightness
                 )  # pylint: disable=protected-access
@@ -1185,9 +1187,16 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 # a = (min_ct-max_ct)/(min_brightness-max_brightness)^2
                 # check: y = (1000-6500)/((1-h)^2)*(x-255)^2+6500 if x=2 then y=1043.221836
                 # ^ when min_brightness=1,max_brightness(h)=255,max_ct=6500,min_ct=1000 ^
-                color_temp_kelvin = (
+                color_temp_kelvin2 = (
                     (min_ct - max_ct) / (min_brightness - max_brightness) ** 2
                 ) * (brightness - max_brightness) ** 2 + max_ct
+                color_temp_kelvin = max(
+                    min(
+                        color_temp_kelvin + (color_temp_kelvin2 - color_temp_kelvin),
+                        max_ct,
+                    ),
+                    min_ct,
+                )
             service_data[ATTR_COLOR_TEMP_KELVIN] = color_temp_kelvin
         elif "color" in features and adapt_color:
             rgb_color = self._settings["rgb_color"]
@@ -1924,6 +1933,8 @@ class TurnOnOffListener:
         last_service_data = self.last_service_data.get(light)
         if last_service_data is None:
             return
+        if switch._dim_to_warm_brightness_check:
+            adapt_brightness = False
         compare_to = functools.partial(
             _attributes_have_changed,
             light=light,
