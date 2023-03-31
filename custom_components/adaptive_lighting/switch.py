@@ -1701,11 +1701,14 @@ class SunLightSettings:
             rgb_color: tuple[float, float, float] = color_temperature_to_rgb(
                 color_temp_kelvin
             )
+        # backwards compatibility for versions < 1.3.1 - see #403
+        color_temp_mired: float = math.floor(1000000 / color_temp_kelvin)
         xy_color: tuple[float, float] = color_RGB_to_xy(*rgb_color)
         hs_color: tuple[float, float] = color_xy_to_hs(*xy_color)
         return {
             "brightness_pct": brightness_pct,
             "color_temp_kelvin": color_temp_kelvin,
+            "color_temp_mired": color_temp_mired,
             "rgb_color": rgb_color,
             "xy_color": xy_color,
             "hs_color": hs_color,
