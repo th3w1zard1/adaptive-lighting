@@ -1347,7 +1347,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 self._name,
             )
             return True
-        last_service_data = self.turn_on_off_listener.last_service_datat
+        last_service_data = self.turn_on_off_listener.last_service_data
         found_light = None
         for light in self._lights:
             if light in last_service_data:
@@ -1961,15 +1961,6 @@ class TurnOnOffListener:
     ) -> bool:
         """Check if the light has been 'on' and is now manually controlled."""
         manual_control = self.manual_control.setdefault(light, False)
-        if force and manual_control:
-            _LOGGER.debug(
-                "%s: Resetting manual control for '%s' due to forced"
-                " call of '_update_manual_control_and_maybe_adapt' context.id='%s'",
-                switch._name,
-                light,
-                context,
-            )
-            manual_control = self.manual_control[light] = False
         if manual_control:
             # Manually controlled until light is turned off and on
             return True
