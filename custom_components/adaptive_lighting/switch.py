@@ -1208,20 +1208,19 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             _LOGGER.debug("%s: Setting rgb_color of light %s", self._name, light)
             service_data[ATTR_RGB_COLOR] = rgb_color
 
-        context = context or self.create_context("adapt_lights")
-        if (
-            self._take_over_control
-            and self._detect_non_ha_changes
-            and not force
-            and await self.turn_on_off_listener.significant_change(
-                self,
+        # If there is a transition, mark the time we started adapting this light
+        # then the next time we start adapting, compare to the last timestamp.
+        # used only when strict_adapting==False
+        if "transition" in features:
+            service_data[ATTR_TRANSITION] = transition
+            self._transition_timer = perf_counter()
+            _LOGGER.debug(
+                "%s: Transition of %s used - no further adapts"
+                " will happen to light %s until this one completes",
+                self._name,
+                transition,
                 light,
-                adapt_brightness,
-                adapt_color,
-                context,
             )
-        ):
-            return
         # See #80. Doesn't check if transitions differ but it does the job.
         last_service_data = self.turn_on_off_listener.last_service_data
         if light in last_service_data and last_service_data[light] == service_data:
@@ -1282,16 +1281,10 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 await asyncio.sleep(self._send_split_delay / 1000.0)
                 await turn_on(service_datas[1])
 
-    # Fixes #447 (and #430 with 'alt_detect_method: true' set)
-    # if we are in the middle of a transition, sleep until that transition finishes.
+    # If we are in the middle of a transition, sleep until that transition finishes.
     # Needed so we can check if the previous adapt attempt succeeded after the
     # transition finalizes the new state.
-    # Someone with a better understanding of async usage could clean this up, not
-    # sure if it's safe to check a variable in another thread.
-    # The '_transitioning' variable is simply set to prevent buildups of multiple
-    # calls to this function all running at once after a long transition finishes
-    # with a short interval set.
-    async def _async_wait_transitions(self, now=None) -> bool:
+    async def _async_waiting_transitions(self, now=None) -> bool:
         _LOGGER.debug("%s: Check if we need to wait for transitions.", self._name)
         if self._transitioning:
             _LOGGER.debug(
@@ -1299,44 +1292,43 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 self._name,
             )
             return True
-        _LOGGER.debug("%s: First call of _async_wait_transitions", self._name)
-        last_service_data = self.turn_on_off_listener.last_service_data
-        _LOGGER.debug("%s: Last service data: %s", self._name, last_service_data)
+        last_service_data = self.turn_on_off_listener.last_service_datat
         found_light = None
         for light in self._lights:
             if light in last_service_data:
                 found_light = light
                 break
-        if not found_light:
+        if found_light is None:
             return False
         if (
             not last_service_data
-            or not len(self._lights)
             or found_light not in last_service_data
             or ATTR_TRANSITION not in last_service_data[found_light]
         ):
             return False
         last_transition = last_service_data[found_light][ATTR_TRANSITION]
-        _LOGGER.debug(
-            "%s: wait_transitions: Transition found in last service"
-            "data: %s seconds Timer: %s. Time remaining: %s",
-            self._name,
-            last_transition,
-            self._transition_timer,
-            (last_transition - (perf_counter() - self._transition_timer)),
-        )
+        time_remaining = last_transition - (perf_counter() - self._transition_timer)
         if (
             self._transition_timer != 0
             and (perf_counter() - self._transition_timer) < last_transition
         ):
             self._transitioning = True
+            _LOGGER.debug(
+                "%s: wait_transitions: Transition found in last service"
+                "data: %s seconds. Time remaining: %s",
+                self._name,
+                last_transition,
+                self._transition_timer,
+                time_remaining,
+            )
             await asyncio.sleep(
                 last_transition - (perf_counter() - self._transition_timer)
             )
-        # wait a short but guaranteed longer time than transition.
-        await asyncio.sleep(0.2)
-        self._transitioning = False
-        self._transition_timer = 0
+            # wait a short but guaranteed longer time than transition.
+            await asyncio.sleep(0.2)
+            self._transitioning = False
+            self._transition_timer = 0
+            return False
 
     async def _update_attrs_and_maybe_adapt_lights(
         self,
@@ -1358,12 +1350,18 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             )
         )
         self.async_write_ha_state()
+
+        # Return here if there's no lights to adapt.
         if lights is None:
             lights = self._lights
-        if not force:
-            if self._only_once or await self._async_wait_transitions(lights):
-                return
+        if not len(lights):
+            return
 
+        if not force:
+            if self._only_once:
+                return
+            if await self._async_waiting_transitions(lights):
+                return
         await self._update_manual_control_and_maybe_adapt(
             lights, transition, force, context
         )
@@ -1376,7 +1374,6 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         context: Context | None,
         adapt_brightness: bool | None = None,
         adapt_color: bool | None = None,
-        prefer_rgb_color: bool | None = None,
     ) -> None:
         assert context is not None
         _LOGGER.debug(
@@ -1919,7 +1916,7 @@ class TurnOnOffListener:
             )
             manual_control = self.manual_control[light] = False
         if manual_control:
-            # Manually controlled until light is turned on and off
+            # Manually controlled until light is turned off and on
             return True
 
         turn_on_event = self.turn_on_event.get(light)
