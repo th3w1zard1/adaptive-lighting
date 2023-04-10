@@ -1,7 +1,16 @@
 """Constants for the Adaptive Lighting integration."""
 
-from homeassistant.components.light import VALID_TRANSITION
-from homeassistant.const import CONF_ENTITY_ID
+from homeassistant.components.light import (
+    ATTR_TRANSITION,
+    LIGHT_TURN_ON_SCHEMA,
+    VALID_TRANSITION,
+)
+from homeassistant.const import (
+    CONF_ENTITY_ID,
+    SERVICE_TOGGLE,
+    SERVICE_TURN_OFF,
+    SERVICE_TURN_ON,
+)
 from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -67,6 +76,14 @@ DOCS[CONF_MIN_BRIGHTNESS] = "Minimum brightness percentage. 💡"
 
 CONF_MIN_COLOR_TEMP, DEFAULT_MIN_COLOR_TEMP = "min_color_temp", 2000
 DOCS[CONF_MIN_COLOR_TEMP] = "Warmest color temperature in Kelvin. 🔥"
+
+CONF_FLAT_LIMITS, DEFAULT_FLAT_LIMITS = "flat_limits", False
+DOCS[CONF_FLAT_LIMITS] = (
+    "When True, will not calculate between the"
+    " max/min supported limits of your light. Example: when adapting brightness to 50% while "
+    + CONF_MAX_BRIGHTNESS
+    + " is set to 80%, Adaptive Lighting will use 80% instead of 90%"
+)
 
 CONF_ONLY_ONCE, DEFAULT_ONLY_ONCE = "only_once", False
 DOCS[CONF_ONLY_ONCE] = (
@@ -154,9 +171,24 @@ CONF_ADAPT_UNTIL_SLEEP, DEFAULT_ADAPT_UNTIL_SLEEP = (
     False,
 )
 DOCS[CONF_ADAPT_UNTIL_SLEEP] = (
+    "This option ignores the current state of the sleep switch. "
     "When enabled, Adaptive Lighting will treat sleep settings as the minimum, "
-    "transitioning to these values after sunset. 🌙"
+    "transitioning color temperature to these values after sunset. 🌙"
 )
+CONF_ADAPT_COLOR_TEMP_UNTIL_SLEEP, DEFAULT_ADAPT_COLOR_TEMP_UNTIL_SLEEP = (
+    "adapt_color_temp_until_sleep",
+    True,
+)
+DOCS[
+    CONF_ADAPT_COLOR_TEMP_UNTIL_SLEEP
+] = "Only active when `transition_until_sleep` is true."
+CONF_ADAPT_BRIGHTNESS_UNTIL_SLEEP, DEFAULT_ADAPT_BRIGHTNESS_UNTIL_SLEEP = (
+    "adapt_brightness_until_sleep",
+    False,
+)
+DOCS[
+    CONF_ADAPT_BRIGHTNESS_UNTIL_SLEEP
+] = "Only active when `transition_until_sleep` is true."
 
 CONF_ADAPT_DELAY, DEFAULT_ADAPT_DELAY = "adapt_delay", 0
 DOCS[CONF_ADAPT_DELAY] = (
@@ -196,12 +228,26 @@ DOCS[CONF_TURN_ON_LIGHTS] = "Whether to turn on lights that are currently off. �
 SERVICE_CHANGE_SWITCH_SETTINGS = "change_switch_settings"
 CONF_USE_DEFAULTS = "use_defaults"
 DOCS[CONF_USE_DEFAULTS] = (
-    "Sets the default values not specified in this service call. Options: "
+    "Where to autofill config options that are not passed to this service. Options: "
     '"current" (default, retains current values), "factory" (resets to '
-    'documented defaults), or "configuration" (reverts to switch config defaults). ⚙️'
+    'documented defaults), or "configuration" (reverts to original user config). ⚙️'
 )
 
+CONF_WHICH_SWITCH, DEFAULT_WHICH_SWITCH = "switch_type", "main"
+DOCS[CONF_WHICH_SWITCH] = (
+    "Which switch to target in this service call. Options: "
+    '"main" (default, targets the main switch), "sleep", "brightness", "color"'
+)
+DOCS[
+    SERVICE_TURN_ON
+] = "Turn on an Adaptive Lighting main/sleep/brightness/color switch"
+DOCS[
+    SERVICE_TURN_OFF
+] = "Turn off an Adaptive Lighting main/sleep/brightness/color switch"
+DOCS[SERVICE_TOGGLE] = "Toggle an Adaptive Lighting main/sleep/brightness/color switch"
+
 TURNING_OFF_DELAY = 5
+CONST_COLOR = "color"
 
 DOCS_MANUAL_CONTROL = {
     CONF_ENTITY_ID: "The `entity_id` of the switch in which to (un)mark the "
@@ -218,9 +264,24 @@ DOCS_APPLY = {
 }
 
 
+# Here we modify existing home assistant schemas for our purposes.
 def int_between(min_int, max_int):
     """Return an integer between 'min_int' and 'max_int'."""
     return vol.All(vol.Coerce(int), vol.Range(min=min_int, max=max_int))
+
+
+def replace_zero_with_none(val: int) -> None:
+    if val == 0:
+        return None
+    return val
+
+
+# Fixes an issue I can't find on github at this moment.
+# Ensure no transition of 0 exists.
+VALID_TRANSITION = vol.All(VALID_TRANSITION, replace_zero_with_none)
+ENTITY_LIGHT_TURN_ON_SCHEMA = LIGHT_TURN_ON_SCHEMA
+# ATTR_ENTITY_ID exists in a different schema in hass.
+ENTITY_LIGHT_TURN_ON_SCHEMA.update({ATTR_TRANSITION: VALID_TRANSITION})
 
 
 VALIDATION_TUPLES = [
@@ -231,6 +292,8 @@ VALIDATION_TUPLES = [
     (CONF_SLEEP_TRANSITION, DEFAULT_SLEEP_TRANSITION, VALID_TRANSITION),
     (CONF_TRANSITION, DEFAULT_TRANSITION, VALID_TRANSITION),
     (CONF_ADAPT_UNTIL_SLEEP, DEFAULT_ADAPT_UNTIL_SLEEP, bool),
+    (CONF_ADAPT_BRIGHTNESS_UNTIL_SLEEP, DEFAULT_ADAPT_BRIGHTNESS_UNTIL_SLEEP, bool),
+    (CONF_ADAPT_COLOR_TEMP_UNTIL_SLEEP, DEFAULT_ADAPT_COLOR_TEMP_UNTIL_SLEEP, bool),
     (CONF_INTERVAL, DEFAULT_INTERVAL, cv.positive_int),
     (CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS, int_between(1, 100)),
     (CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS, int_between(1, 100)),
@@ -261,6 +324,7 @@ VALIDATION_TUPLES = [
     (CONF_MIN_SUNSET_TIME, NONE_STR, str),
     (CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET, int),
     (CONF_ONLY_ONCE, DEFAULT_ONLY_ONCE, bool),
+    (CONF_FLAT_LIMITS, DEFAULT_FLAT_LIMITS, bool),
     (CONF_TAKE_OVER_CONTROL, DEFAULT_TAKE_OVER_CONTROL, bool),
     (CONF_DETECT_NON_HA_CHANGES, DEFAULT_DETECT_NON_HA_CHANGES, bool),
     (CONF_SEPARATE_TURN_ON_COMMANDS, DEFAULT_SEPARATE_TURN_ON_COMMANDS, bool),
@@ -272,6 +336,8 @@ VALIDATION_TUPLES = [
         int_between(0, 365 * 24 * 60 * 60),  # 1 year max
     ),
 ]
+
+CONST_COLOR = "color"
 
 
 def timedelta_as_int(value):
@@ -321,28 +387,44 @@ _DOMAIN_SCHEMA = vol.Schema(
 )
 
 
-def apply_service_schema(initial_transition: int = 1):
-    """Return the schema for the apply service."""
-    return vol.Schema(
-        {
-            vol.Optional(CONF_ENTITY_ID): cv.entity_ids,
-            vol.Optional(CONF_LIGHTS, default=[]): cv.entity_ids,
-            vol.Optional(
-                CONF_TRANSITION,
-                default=initial_transition,
-            ): VALID_TRANSITION,
-            vol.Optional(ATTR_ADAPT_BRIGHTNESS, default=True): cv.boolean,
-            vol.Optional(ATTR_ADAPT_COLOR, default=True): cv.boolean,
-            vol.Optional(CONF_PREFER_RGB_COLOR, default=False): cv.boolean,
-            vol.Optional(CONF_TURN_ON_LIGHTS, default=False): cv.boolean,
-        }
-    )
+SCHEMA_APPLY = vol.Schema(
+    {
+        vol.Optional(CONF_ENTITY_ID): cv.entity_ids,
+        vol.Optional(CONF_LIGHTS, default=[]): cv.entity_ids,
+        vol.Optional(CONF_TRANSITION): VALID_TRANSITION,
+        vol.Optional(ATTR_ADAPT_BRIGHTNESS, default=True): cv.boolean,
+        vol.Optional(ATTR_ADAPT_COLOR, default=True): cv.boolean,
+        vol.Optional(CONF_PREFER_RGB_COLOR, default=False): cv.boolean,
+        vol.Optional(CONF_TURN_ON_LIGHTS, default=False): cv.boolean,
+    }
+)
 
 
-SET_MANUAL_CONTROL_SCHEMA = vol.Schema(
+SERVICE_TOGGLE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_ENTITY_ID): cv.entity_ids,
+        vol.Optional(CONF_LIGHTS, default=[]): cv.entity_ids,
+        vol.Optional(CONF_WHICH_SWITCH): cv.string,
+    }
+)
+
+SCHEMA_SET_MANUAL_CONTROL = vol.Schema(
     {
         vol.Optional(CONF_ENTITY_ID): cv.entity_ids,
         vol.Optional(CONF_LIGHTS, default=[]): cv.entity_ids,
         vol.Optional(CONF_MANUAL_CONTROL, default=True): cv.boolean,
+    }
+)
+
+SCHEMA_CHANGE_SWITCH_SETTINGS = vol.Schema(
+    {
+        vol.Optional(CONF_USE_DEFAULTS): cv.string,
+        vol.Optional(CONF_ENTITY_ID): cv.entity_ids,
+        vol.Required(CONF_LIGHTS, default=[]): [],
+        **{
+            vol.Optional(k): valid
+            for k, _, valid in VALIDATION_TUPLES
+            if k not in [CONF_INTERVAL, CONF_NAME, CONF_LIGHTS]
+        },
     }
 )

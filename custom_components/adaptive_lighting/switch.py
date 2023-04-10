@@ -23,7 +23,11 @@ from homeassistant.components.light import (
     ATTR_COLOR_NAME,
     ATTR_COLOR_TEMP_KELVIN,
     ATTR_HS_COLOR,
+    ATTR_MAX_COLOR_TEMP_KELVIN,
+    ATTR_MIN_COLOR_TEMP_KELVIN,
     ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
+    ATTR_RGBWW_COLOR,
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_TRANSITION,
     ATTR_XY_COLOR,
@@ -32,6 +36,7 @@ from homeassistant.components.light import (
     COLOR_MODE_HS,
     COLOR_MODE_RGB,
     COLOR_MODE_RGBW,
+    COLOR_MODE_RGBWW,
     COLOR_MODE_XY,
 )
 from homeassistant.components.light import (
@@ -56,6 +61,7 @@ from homeassistant.const import (
     EVENT_CALL_SERVICE,
     EVENT_HOMEASSISTANT_STARTED,
     EVENT_STATE_CHANGED,
+    SERVICE_TOGGLE,
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
@@ -63,15 +69,19 @@ from homeassistant.const import (
     SUN_EVENT_SUNRISE,
     SUN_EVENT_SUNSET,
 )
+
+# From HASS: `async_get_hass()` This should be used where it's very
+# cumbersome or downright impossible to pass hass to the code which needs it.
 from homeassistant.core import (
     Context,
     Event,
     HomeAssistant,
     ServiceCall,
     State,
+    async_get_hass,
     callback,
 )
-from homeassistant.helpers import entity_platform, entity_registry
+from homeassistant.helpers import entity_registry
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -85,8 +95,10 @@ from homeassistant.util.color import (
     color_RGB_to_xy,
     color_temperature_to_rgb,
     color_xy_to_hs,
+    color_xy_to_RGB,
 )
 import homeassistant.util.dt as dt_util
+import ulid_transform
 import voluptuous as vol
 
 from .const import (
@@ -95,10 +107,13 @@ from .const import (
     ATTR_ADAPT_BRIGHTNESS,
     ATTR_ADAPT_COLOR,
     ATTR_TURN_ON_OFF_LISTENER,
+    CONF_ADAPT_BRIGHTNESS_UNTIL_SLEEP,
+    CONF_ADAPT_COLOR_TEMP_UNTIL_SLEEP,
     CONF_ADAPT_DELAY,
     CONF_ADAPT_UNTIL_SLEEP,
     CONF_AUTORESET_CONTROL,
     CONF_DETECT_NON_HA_CHANGES,
+    CONF_FLAT_LIMITS,
     CONF_INCLUDE_CONFIG_IN_ATTRIBUTES,
     CONF_INITIAL_TRANSITION,
     CONF_INTERVAL,
@@ -127,30 +142,55 @@ from .const import (
     CONF_TRANSITION,
     CONF_TURN_ON_LIGHTS,
     CONF_USE_DEFAULTS,
+    CONF_WHICH_SWITCH,
+    CONST_COLOR,
     DOMAIN,
+    ENTITY_LIGHT_TURN_ON_SCHEMA,
     EXTRA_VALIDATION,
     ICON_BRIGHTNESS,
     ICON_COLOR_TEMP,
     ICON_MAIN,
     ICON_SLEEP,
+    SCHEMA_APPLY,
+    SCHEMA_CHANGE_SWITCH_SETTINGS,
+    SCHEMA_SET_MANUAL_CONTROL,
     SERVICE_APPLY,
     SERVICE_CHANGE_SWITCH_SETTINGS,
     SERVICE_SET_MANUAL_CONTROL,
-    SET_MANUAL_CONTROL_SCHEMA,
+    SERVICE_TOGGLE_SCHEMA,
     SLEEP_MODE_SWITCH,
     SUN_EVENT_MIDNIGHT,
     SUN_EVENT_NOON,
     TURNING_OFF_DELAY,
     VALIDATION_TUPLES,
-    apply_service_schema,
     replace_none_str,
 )
 
 _SUPPORT_OPTS = {
-    "brightness": SUPPORT_BRIGHTNESS,
-    "color_temp": SUPPORT_COLOR_TEMP,
-    "color": SUPPORT_COLOR,
-    "transition": SUPPORT_TRANSITION,
+    COLOR_MODE_BRIGHTNESS: SUPPORT_BRIGHTNESS,
+    COLOR_MODE_COLOR_TEMP: SUPPORT_COLOR_TEMP,
+    CONST_COLOR: SUPPORT_COLOR,
+    ATTR_TRANSITION: SUPPORT_TRANSITION,
+}
+
+VALID_COLOR_MODES = {
+    COLOR_MODE_BRIGHTNESS: ATTR_BRIGHTNESS,
+    COLOR_MODE_COLOR_TEMP: ATTR_COLOR_TEMP_KELVIN,
+    COLOR_MODE_HS: ATTR_HS_COLOR,
+    COLOR_MODE_RGB: ATTR_RGB_COLOR,
+    COLOR_MODE_RGBW: ATTR_RGBW_COLOR,
+    COLOR_MODE_RGBWW: ATTR_RGBWW_COLOR,
+    COLOR_MODE_XY: ATTR_XY_COLOR,
+}
+
+VALID_COLOR_MODES = {
+    COLOR_MODE_BRIGHTNESS: ATTR_BRIGHTNESS,
+    COLOR_MODE_COLOR_TEMP: ATTR_COLOR_TEMP_KELVIN,
+    COLOR_MODE_HS: ATTR_HS_COLOR,
+    COLOR_MODE_RGB: ATTR_RGB_COLOR,
+    COLOR_MODE_RGBW: ATTR_RGBW_COLOR,
+    COLOR_MODE_RGBWW: ATTR_RGBWW_COLOR,
+    COLOR_MODE_XY: ATTR_XY_COLOR,
 }
 
 _ORDER = (SUN_EVENT_SUNRISE, SUN_EVENT_NOON, SUN_EVENT_SUNSET, SUN_EVENT_MIDNIGHT)
@@ -170,6 +210,8 @@ COLOR_ATTRS = {  # Should ATTR_PROFILE be in here?
     ATTR_COLOR_TEMP_KELVIN,
     ATTR_HS_COLOR,
     ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
+    ATTR_RGBWW_COLOR,
     ATTR_XY_COLOR,
 }
 
@@ -181,21 +223,58 @@ BRIGHTNESS_ATTRS = {
 }
 
 # Keep a short domain version for the context instances (which can only be 36 chars)
-_DOMAIN_SHORT = "adapt_lgt"
+_DOMAIN_SHORT = "al"
 
 
-def _int_to_bytes(i: int, signed: bool = False) -> bytes:
-    bits = i.bit_length()
-    if signed:
-        # Make room for the sign bit.
-        bits += 1
-    return i.to_bytes((bits + 7) // 8, "little", signed=signed)
+def _int_to_base36(num: int) -> str:
+    """
+    Convert an integer to its base-36 representation using numbers and uppercase letters.
+
+    Base-36 encoding uses digits 0-9 and uppercase letters A-Z, providing a case-insensitive
+    alphanumeric representation. The function takes an integer `num` as input and returns
+    its base-36 representation as a string.
+
+    Parameters
+    ----------
+    num
+        The integer to convert to base-36.
+
+    Returns
+    -------
+    str
+        The base-36 representation of the input integer.
+
+    Examples
+    --------
+    >>> num = 123456
+    >>> base36_num = int_to_base36(num)
+    >>> print(base36_num)
+    '2N9'
+    """
+    ALPHANUMERIC_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    if num == 0:
+        return ALPHANUMERIC_CHARS[0]
+
+    base36_str = ""
+    base = len(ALPHANUMERIC_CHARS)
+
+    while num:
+        num, remainder = divmod(num, base)
+        base36_str = ALPHANUMERIC_CHARS[remainder] + base36_str
+
+    return base36_str
 
 
 def _short_hash(string: str, length: int = 4) -> str:
     """Create a hash of 'string' with length 'length'."""
-    str_hash_bytes = _int_to_bytes(hash(string), signed=True)
-    return base64.b85encode(str_hash_bytes)[:length]
+    return base64.b32encode(string.encode()).decode("utf-8").zfill(length)[:length]
+
+
+def _remove_vowels(input_str: str, length: int = 4) -> str:
+    vowels = "aeiouAEIOU"
+    output_str = "".join([char for char in input_str if char not in vowels])
+    return output_str.zfill(length)[:length]
 
 
 def create_context(
@@ -203,12 +282,16 @@ def create_context(
 ) -> Context:
     """Create a context that can identify this integration."""
     # Use a hash for the name because otherwise the context might become
-    # too long (max len == 36) to fit in the database.
-    name_hash = _short_hash(name)
+    # too long (max len == 26) to fit in the database.
     # Pack index with base85 to maximize the number of contexts we can create
-    # before we exceed the 36-character limit and are forced to wrap.
-    index_packed = base64.b85encode(_int_to_bytes(index, signed=False))
-    context_id = f"{_DOMAIN_SHORT}:{name_hash}:{which}:{index_packed}"[:36]
+    # before we exceed the 26-character limit and are forced to wrap.
+    time_stamp = ulid_transform.ulid_now()[:10]  # time part of a ULID
+    name_hash = _short_hash(name)
+    which_short = _remove_vowels(which)
+    context_id_start = f"{time_stamp}:{_DOMAIN_SHORT}:{name_hash}:{which_short}:"
+    chars_left = 26 - len(context_id_start)
+    index_packed = _int_to_base36(index).zfill(chars_left)[-chars_left:]
+    context_id = context_id_start + index_packed
     parent_id = parent.id if parent else None
     return Context(id=context_id, parent_id=parent_id)
 
@@ -217,7 +300,7 @@ def is_our_context(context: Context | None) -> bool:
     """Check whether this integration created 'context'."""
     if context is None:
         return False
-    return context.id.startswith(_DOMAIN_SHORT)
+    return f":{_DOMAIN_SHORT}:" in context.id
 
 
 def _split_service_data(service_data, adapt_brightness, adapt_color):
@@ -243,9 +326,9 @@ def _split_service_data(service_data, adapt_brightness, adapt_color):
 
 
 def _get_switches_with_lights(
-    hass: HomeAssistant, lights: list[str]
+    hass: HomeAssistant, lights: list[str] | None = None
 ) -> list[AdaptiveSwitch]:
-    """Get all switches that control at least one of the lights passed."""
+    """Get all switches. If lights is defined, return only switches found with these lights."""
     config_entries = hass.config_entries.async_entries(DOMAIN)
     data = hass.data[DOMAIN]
     switches = []
@@ -254,10 +337,15 @@ def _get_switches_with_lights(
         if entry is None:  # entry might be disabled and therefore missing
             continue
         switch = data[config.entry_id]["instance"]
-        all_check_lights = _expand_light_groups(hass, lights)
-        switch._expand_light_groups()
-        # Check if any of the lights are in the switch's lights
-        if set(switch._lights) & set(all_check_lights):
+        if lights:
+            all_check_lights = _expand_light_groups(hass, lights)
+            switch._expand_light_groups()  # pylint: disable=protected-access
+            # Check if any of the lights are in the switch's lights
+            if set(switch._lights) & set(
+                all_check_lights
+            ):  # pylint: disable=protected-access
+                switches.append(switch)
+        else:
             switches.append(switch)
     return switches
 
@@ -299,13 +387,7 @@ def _get_switches_from_service_call(
     switch_entity_ids: list[str] | None = data.get("entity_id")
 
     if not lights and not switch_entity_ids:
-        raise ValueError(
-            "adaptive-lighting: Neither a switch nor a light was provided in the service call."
-            " If you intend to adapt all lights on all switches, please inform the developers at"
-            " https://github.com/basnijholt/adaptive-lighting about your use case."
-            " Currently, you must pass either an adaptive-lighting switch or the lights to an"
-            " `adaptive_lighting` service call."
-        )
+        return _get_switches_with_lights(hass)
 
     if switch_entity_ids is not None:
         if len(switch_entity_ids) > 1 and lights:
@@ -331,44 +413,6 @@ def _get_switches_from_service_call(
     )
 
 
-async def handle_change_switch_settings(
-    switch: AdaptiveSwitch, service_call: ServiceCall
-) -> None:
-    """Allows HASS to change config values via a service call."""
-    data = service_call.data
-
-    which = data.get(CONF_USE_DEFAULTS, "current")
-    if which == "current":  # use whatever we're already using.
-        defaults = switch._current_settings  # pylint: disable=protected-access
-    elif which == "factory":  # use actual defaults listed in the documentation
-        defaults = {key: default for key, default, _ in VALIDATION_TUPLES}
-    elif which == "configuration":
-        # use whatever's in the config flow or configuration.yaml
-        defaults = switch._config_backup  # pylint: disable=protected-access
-    else:
-        defaults = None
-
-    switch._set_changeable_settings(
-        data=data,
-        defaults=defaults,
-    )
-
-    _LOGGER.debug(
-        "Called 'adaptive_lighting.change_switch_settings' service with '%s'",
-        data,
-    )
-
-    all_lights = switch._lights  # pylint: disable=protected-access
-    switch.turn_on_off_listener.reset(*all_lights, reset_manual_control=False)
-    if switch.is_on:
-        await switch._update_attrs_and_maybe_adapt_lights(  # pylint: disable=protected-access
-            all_lights,
-            transition=switch._initial_transition,
-            force=True,
-            context=switch.create_context("service", parent=service_call.context),
-        )
-
-
 @callback
 def _fire_manual_control_event(
     switch: AdaptiveSwitch, light: str, context: Context, is_async=True
@@ -381,11 +425,195 @@ def _fire_manual_control_event(
         switch.entity_id,
         light,
     )
+    switch.turn_on_off_listener.mark_as_manual_control(light)
     fire(
         f"{DOMAIN}.manual_control",
         {ATTR_ENTITY_ID: light, SWITCH_DOMAIN: switch.entity_id},
         context=context,
     )
+
+
+@callback
+async def handle_turn_on(service_call: ServiceCall):
+    """Toggles the specified switch."""
+    hass = async_get_hass()
+    data = service_call.data
+    _LOGGER.debug(
+        "Called 'adaptive_lighting.turn_on' service with '%s'",
+        data,
+    )
+    switches = _get_switches_from_service_call(hass, service_call)
+    if data[CONF_WHICH_SWITCH] == "sleep":
+        switches = [s.sleep_mode_switch for s in switches]
+    elif data[CONF_WHICH_SWITCH] == "brightness":
+        switches = [s.adapt_brightness_switch for s in switches]
+    elif data[CONF_WHICH_SWITCH] == "color":
+        switches = [s.adapt_color_switch for s in switches]
+
+    _LOGGER.debug("Turning on switches [%s]", switches)
+    for switch in switches:
+        await switch.async_turn_on()
+
+
+@callback
+async def handle_turn_off(service_call: ServiceCall):
+    """Toggles the specified switch."""
+    hass = async_get_hass()
+    data = service_call.data
+    _LOGGER.debug(
+        "Called 'adaptive_lighting.turn_off' service with '%s'",
+        data,
+    )
+    switches = _get_switches_from_service_call(hass, service_call)
+    if data[CONF_WHICH_SWITCH] == "sleep":
+        switches = [s.sleep_mode_switch for s in switches]
+    elif data[CONF_WHICH_SWITCH] == "brightness":
+        switches = [s.adapt_brightness_switch for s in switches]
+    elif data[CONF_WHICH_SWITCH] == "color":
+        switches = [s.adapt_color_switch for s in switches]
+    _LOGGER.debug("Turning off switches [%s]", switches)
+    for switch in switches:
+        await switch.async_turn_off()
+
+
+@callback
+async def handle_toggle(service_call: ServiceCall):
+    """Toggles the specified switch."""
+    hass = async_get_hass()
+    data = service_call.data
+    _LOGGER.debug(
+        "Called 'adaptive_lighting.toggle' service with '%s'",
+        data,
+    )
+    switches = _get_switches_from_service_call(hass, service_call)
+    if data[CONF_WHICH_SWITCH] == "sleep":
+        switches = [s.sleep_mode_switch for s in switches]
+    elif data[CONF_WHICH_SWITCH] == "brightness":
+        switches = [s.adapt_brightness_switch for s in switches]
+    elif data[CONF_WHICH_SWITCH] == "color":
+        switches = [s.adapt_color_switch for s in switches]
+    _LOGGER.debug("Toggling switches [%s]", switches)
+    for switch in switches:
+        if switch.is_on:
+            await switch.async_turn_off()
+        else:
+            await switch.async_turn_on()
+
+
+@callback
+async def handle_apply(service_call: ServiceCall):
+    """Handle the entity service apply."""
+    hass = async_get_hass()
+    data = service_call.data
+    _LOGGER.debug(
+        "Called 'adaptive_lighting.apply' service with '%s'",
+        data,
+    )
+    switches = _get_switches_from_service_call(hass, service_call)
+    lights = data[CONF_LIGHTS]
+    for switch in switches:
+        if not lights:
+            all_lights = lights or switch._lights  # pylint: disable=protected-access
+        else:
+            all_lights = _expand_light_groups(switch.hass, lights)
+        switch.turn_on_off_listener.lights.update(all_lights)
+        for light in all_lights:
+            transition = data.get(CONF_TRANSITION)
+            if not data[CONF_TURN_ON_LIGHTS]:
+                if not is_on(hass, light):
+                    continue
+                if not transition:
+                    transition = switch._transition  # pylint: disable=protected-access
+            elif not transition:
+                transition = (
+                    switch._initial_transition
+                )  # pylint: disable=protected-access
+            await switch._adapt_light(  # pylint: disable=protected-access
+                light,
+                transition,
+                data[ATTR_ADAPT_BRIGHTNESS],
+                data[ATTR_ADAPT_COLOR],
+                data[CONF_PREFER_RGB_COLOR],
+                force=True,
+                context=switch.create_context("service", parent=service_call.context),
+            )
+
+
+@callback
+async def handle_set_manual_control(service_call: ServiceCall):
+    """Set or unset lights as 'manually controlled'."""
+    hass = async_get_hass()
+    data = service_call.data
+    _LOGGER.debug(
+        "Called 'adaptive_lighting.set_manual_control' service with '%s'",
+        data,
+    )
+    switches = _get_switches_from_service_call(hass, service_call)
+    lights = data[CONF_LIGHTS]
+    for switch in switches:
+        if not lights:
+            all_lights = switch._lights  # pylint: disable=protected-access
+        else:
+            all_lights = _expand_light_groups(switch.hass, lights)
+        if service_call.data[CONF_MANUAL_CONTROL]:
+            for light in all_lights:
+                _fire_manual_control_event(switch, light, service_call.context)
+        else:
+            switch.turn_on_off_listener.reset(*all_lights)
+            if switch.is_on:
+                # pylint: disable=protected-access
+                await switch._update_attrs_and_maybe_adapt_lights(
+                    all_lights,
+                    transition=switch._initial_transition,
+                    force=True,
+                    context=switch.create_context(
+                        "service", parent=service_call.context
+                    ),
+                )
+
+
+@callback
+async def handle_change_switch_settings(service_call: ServiceCall) -> None:
+    """Allows HASS to change config values via a service call."""
+    hass = async_get_hass()
+    data = service_call.data
+    _LOGGER.debug(
+        "Called 'adaptive_lighting.change_switch_settings' service with '%s'",
+        data,
+    )
+
+    switches = _get_switches_from_service_call(hass, service_call)
+    for switch in switches:
+        # which denotes where to autofill blank config options.
+        which = data.get(CONF_USE_DEFAULTS, "current")
+        if which == "current":
+            # use whatever we're already using.
+            defaults = switch._current_settings  # pylint: disable=protected-access
+        elif which == "factory":
+            # use actual defaults listed in the documentation
+            defaults = {key: default for key, default, _ in VALIDATION_TUPLES}
+        elif which == "configuration":
+            # use whatever's in the config flow or configuration.yaml
+            defaults = switch._config_backup  # pylint: disable=protected-access
+        else:
+            defaults = None
+
+        switch._set_changeable_settings(
+            data=data,
+            defaults=defaults,
+        )
+
+        all_lights = switch._lights  # pylint: disable=protected-access
+        switch.turn_on_off_listener.reset(*all_lights, reset_manual_control=False)
+
+        if not switch.is_on:
+            continue
+        await switch._update_attrs_and_maybe_adapt_lights(  # pylint: disable=protected-access
+            all_lights,
+            transition=switch._transition,
+            force=True,
+            context=switch.create_context("service", parent=service_call.context),
+        )
 
 
 async def async_setup_entry(
@@ -429,76 +657,36 @@ async def async_setup_entry(
         update_before_add=True,
     )
 
-    @callback
-    async def handle_apply(service_call: ServiceCall):
-        """Handle the entity service apply."""
-        data = service_call.data
-        _LOGGER.debug(
-            "Called 'adaptive_lighting.apply' service with '%s'",
-            data,
-        )
-        switches = _get_switches_from_service_call(hass, service_call)
-        lights = data[CONF_LIGHTS]
-        for switch in switches:
-            if not lights:
-                all_lights = switch._lights  # pylint: disable=protected-access
-            else:
-                all_lights = _expand_light_groups(switch.hass, lights)
-            switch.turn_on_off_listener.lights.update(all_lights)
-            for light in all_lights:
-                if data[CONF_TURN_ON_LIGHTS] or is_on(hass, light):
-                    await switch._adapt_light(  # pylint: disable=protected-access
-                        light,
-                        data[CONF_TRANSITION],
-                        data[ATTR_ADAPT_BRIGHTNESS],
-                        data[ATTR_ADAPT_COLOR],
-                        data[CONF_PREFER_RGB_COLOR],
-                        force=True,
-                        context=switch.create_context(
-                            "service", parent=service_call.context
-                        ),
-                    )
-
-    @callback
-    async def handle_set_manual_control(service_call: ServiceCall):
-        """Set or unset lights as 'manually controlled'."""
-        data = service_call.data
-        _LOGGER.debug(
-            "Called 'adaptive_lighting.set_manual_control' service with '%s'",
-            data,
-        )
-        switches = _get_switches_from_service_call(hass, service_call)
-        lights = data[CONF_LIGHTS]
-        for switch in switches:
-            if not lights:
-                all_lights = switch._lights  # pylint: disable=protected-access
-            else:
-                all_lights = _expand_light_groups(switch.hass, lights)
-            if service_call.data[CONF_MANUAL_CONTROL]:
-                for light in all_lights:
-                    switch.turn_on_off_listener.mark_as_manual_control(light)
-                    _fire_manual_control_event(switch, light, service_call.context)
-            else:
-                switch.turn_on_off_listener.reset(*all_lights)
-                if switch.is_on:
-                    # pylint: disable=protected-access
-                    await switch._update_attrs_and_maybe_adapt_lights(
-                        all_lights,
-                        transition=switch._initial_transition,
-                        force=True,
-                        context=switch.create_context(
-                            "service", parent=service_call.context
-                        ),
-                    )
-
     # Register `apply` service
     hass.services.async_register(
         domain=DOMAIN,
         service=SERVICE_APPLY,
         service_func=handle_apply,
-        schema=apply_service_schema(
-            switch._initial_transition
-        ),  # pylint: disable=protected-access
+        schema=SCHEMA_APPLY,
+    )
+
+    # Register `turn_on` service
+    hass.services.async_register(
+        domain=DOMAIN,
+        service=SERVICE_TURN_ON,
+        service_func=handle_turn_on,
+        schema=SERVICE_TOGGLE_SCHEMA,
+    )
+
+    # Register `turn_off` service
+    hass.services.async_register(
+        domain=DOMAIN,
+        service=SERVICE_TURN_OFF,
+        service_func=handle_turn_off,
+        schema=SERVICE_TOGGLE_SCHEMA,
+    )
+
+    # Register `toggle` service
+    hass.services.async_register(
+        domain=DOMAIN,
+        service=SERVICE_TOGGLE,
+        service_func=handle_toggle,
+        schema=SERVICE_TOGGLE_SCHEMA,
     )
 
     # Register `set_manual_control` service
@@ -506,20 +694,15 @@ async def async_setup_entry(
         domain=DOMAIN,
         service=SERVICE_SET_MANUAL_CONTROL,
         service_func=handle_set_manual_control,
-        schema=SET_MANUAL_CONTROL_SCHEMA,
+        schema=SCHEMA_SET_MANUAL_CONTROL,
     )
 
-    args = {vol.Optional(CONF_USE_DEFAULTS, default="current"): cv.string}
-    # Modifying these after init isn't possible
-    skip = (CONF_INTERVAL, CONF_NAME, CONF_LIGHTS)
-    for k, _, valid in VALIDATION_TUPLES:
-        if k not in skip:
-            args[vol.Optional(k)] = valid
-    platform = entity_platform.current_platform.get()
-    platform.async_register_entity_service(
-        SERVICE_CHANGE_SWITCH_SETTINGS,
-        args,
-        handle_change_switch_settings,
+    # Register `change_switch_settings` service
+    hass.services.async_register(
+        domain=DOMAIN,
+        service=SERVICE_CHANGE_SWITCH_SETTINGS,
+        service_func=handle_change_switch_settings,
+        schema=SCHEMA_CHANGE_SWITCH_SETTINGS,
     )
 
 
@@ -570,8 +753,8 @@ def _expand_light_groups(hass: HomeAssistant, lights: list[str]) -> list[str]:
         if state is None:
             _LOGGER.debug("State of %s is None", light)
             all_lights.add(light)
-        elif "entity_id" in state.attributes:  # it's a light group
-            group = state.attributes["entity_id"]
+        elif ATTR_ENTITY_ID in state.attributes:  # it's a light group
+            group = state.attributes[ATTR_ENTITY_ID]
             turn_on_off_listener.lights.discard(light)
             all_lights.update(group)
             _LOGGER.debug("Expanded %s to %s", light, group)
@@ -580,33 +763,51 @@ def _expand_light_groups(hass: HomeAssistant, lights: list[str]) -> list[str]:
     return list(all_lights)
 
 
+def _supported_to_attributes(supported):
+    supported_attributes = {}
+    supports_colors = False
+    for mode, attr in VALID_COLOR_MODES.items():
+        if mode not in supported:
+            continue
+        supported_attributes[attr] = True
+        if (
+            not supports_colors
+            and mode != COLOR_MODE_BRIGHTNESS
+            and mode != COLOR_MODE_COLOR_TEMP
+        ):
+            supports_colors = True
+    return supported_attributes, supports_colors
+
+
 def _supported_features(hass: HomeAssistant, light: str):
     state = hass.states.get(light)
-    supported_features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
-    supported = {
-        key for key, value in _SUPPORT_OPTS.items() if supported_features & value
+    legacy_supported_features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
+    legacy_supported = {
+        key for key, value in _SUPPORT_OPTS.items() if legacy_supported_features & value
     }
     supported_color_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES, set())
-    if COLOR_MODE_RGB in supported_color_modes:
-        supported.add("color")
+    supported, supports_colors = _supported_to_attributes(
+        legacy_supported.union(supported_color_modes)
+    )
+    min_kelvin = state.attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN)
+    max_kelvin = state.attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN)
+    supported.update(
+        {
+            ATTR_MIN_COLOR_TEMP_KELVIN: min_kelvin,
+            ATTR_MAX_COLOR_TEMP_KELVIN: max_kelvin,
+        }
+    )
+    if supports_colors:
         # Adding brightness here, see
         # comment https://github.com/basnijholt/adaptive-lighting/issues/112#issuecomment-836944011
-        supported.add("brightness")
-    if COLOR_MODE_RGBW in supported_color_modes:
-        supported.add("color")
-        supported.add("brightness")  # see above url
-    if COLOR_MODE_XY in supported_color_modes:
-        supported.add("color")
-        supported.add("brightness")  # see above url
-    if COLOR_MODE_HS in supported_color_modes:
-        supported.add("color")
-        supported.add("brightness")  # see above url
-    if COLOR_MODE_COLOR_TEMP in supported_color_modes:
-        supported.add("color_temp")
-        supported.add("brightness")  # see above url
-    if COLOR_MODE_BRIGHTNESS in supported_color_modes:
-        supported.add("brightness")
-    return supported
+        supported[ATTR_BRIGHTNESS] = True
+        if CONST_COLOR not in legacy_supported:
+            # supports_colors = False
+            _LOGGER.debug(
+                "'supported_color_modes' supports color but the legacy 'supported_features'"
+                " bitfield says we do not. Despite this we'll assume light '%s' supports colors",
+            )
+    return supported, supports_colors
 
 
 def color_difference_redmean(
@@ -628,6 +829,41 @@ def color_difference_redmean(
     return math.sqrt(red_term + green_term + blue_term)
 
 
+# All comparisons should be done with RGB since
+# converting anything to color temp is inaccurate.
+def _convert_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    if ATTR_RGB_COLOR in attributes:
+        return attributes
+
+    rgb = None
+    if ATTR_COLOR_TEMP_KELVIN in attributes:
+        rgb = color_temperature_to_rgb(attributes[ATTR_COLOR_TEMP_KELVIN])
+    elif ATTR_XY_COLOR in attributes:
+        rgb = color_xy_to_RGB(*attributes[ATTR_XY_COLOR])
+
+    if rgb is not None:
+        attributes[ATTR_RGB_COLOR] = rgb
+        _LOGGER.debug(f"Converted {attributes} to rgb {rgb}")
+    else:
+        _LOGGER.debug("No suitable conversion found")
+
+    return attributes
+
+
+def _add_missing_attributes(
+    old_attributes: dict[str, Any],
+    new_attributes: dict[str, Any],
+) -> dict[str, Any]:
+    if not any(
+        attr in old_attributes and attr in new_attributes
+        for attr in [ATTR_COLOR_TEMP_KELVIN, ATTR_RGB_COLOR]
+    ):
+        old_attributes = _convert_attributes(old_attributes)
+        new_attributes = _convert_attributes(new_attributes)
+
+    return old_attributes, new_attributes
+
+
 def _attributes_have_changed(
     light: str,
     old_attributes: dict[str, Any],
@@ -636,6 +872,11 @@ def _attributes_have_changed(
     adapt_color: bool,
     context: Context,
 ) -> bool:
+    if adapt_color:
+        old_attributes, new_attributes = _add_missing_attributes(
+            old_attributes, new_attributes
+        )
+
     if (
         adapt_brightness
         and ATTR_BRIGHTNESS in old_attributes
@@ -690,21 +931,6 @@ def _attributes_have_changed(
                 context.id,
             )
             return True
-
-    switched_color_temp = (
-        ATTR_RGB_COLOR in old_attributes and ATTR_RGB_COLOR not in new_attributes
-    )
-    switched_to_rgb_color = (
-        ATTR_COLOR_TEMP_KELVIN in old_attributes
-        and ATTR_COLOR_TEMP_KELVIN not in new_attributes
-    )
-    if switched_color_temp or switched_to_rgb_color:
-        # Light switched from RGB mode to color_temp or visa versa
-        _LOGGER.debug(
-            "'%s' switched from RGB mode to color_temp or visa versa",
-            light,
-        )
-        return True
     return False
 
 
@@ -770,6 +996,11 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             data,
         )
 
+    def __getattribute__(self, name):
+        if name == "_lights":
+            self._expand_light_groups()
+        return object.__getattribute__(self, name)
+
     def _set_changeable_settings(
         self,
         data: dict,
@@ -828,7 +1059,10 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         self._sun_light_settings = SunLightSettings(
             name=self._name,
             astral_location=location,
+            adapt_brightness_until_sleep=data[CONF_ADAPT_BRIGHTNESS_UNTIL_SLEEP],
+            adapt_color_temp_until_sleep=data[CONF_ADAPT_COLOR_TEMP_UNTIL_SLEEP],
             adapt_until_sleep=data[CONF_ADAPT_UNTIL_SLEEP],
+            flat_limits=data[CONF_FLAT_LIMITS],
             max_brightness=data[CONF_MAX_BRIGHTNESS],
             max_color_temp=data[CONF_MAX_COLOR_TEMP],
             min_brightness=data[CONF_MIN_BRIGHTNESS],
@@ -889,12 +1123,14 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         self._remove_listeners()
 
     def _expand_light_groups(self) -> None:
-        all_lights = _expand_light_groups(self.hass, self._lights)
+        all_lights = _expand_light_groups(
+            self.hass, object.__getattribute__(self, "_lights")
+        )
         self.turn_on_off_listener.lights.update(all_lights)
         self.turn_on_off_listener.set_auto_reset_manual_control_times(
             all_lights, self._auto_reset_manual_control_time
         )
-        self._lights = list(all_lights)
+        object.__setattr__(self, "_lights", list(all_lights))
 
     async def _setup_listeners(self, _=None) -> None:
         _LOGGER.debug("%s: Called '_setup_listeners'", self._name)
@@ -915,10 +1151,10 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
 
         self.remove_listeners.extend([remove_interval, remove_sleep])
 
-        if self._lights:
-            self._expand_light_groups()
+        lights = self._lights
+        if lights:
             remove_state = async_track_state_change_event(
-                self.hass, self._lights, self._light_event
+                self.hass, lights, self._light_event
             )
             self.remove_listeners.append(remove_state)
 
@@ -940,12 +1176,19 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             for key in self._settings:
                 extra_state_attributes[key] = None
             return extra_state_attributes
+        lights = self._lights
         extra_state_attributes["manual_control"] = [
             light
-            for light in self._lights
+            for light in lights
             if self.turn_on_off_listener.manual_control.get(light)
         ]
         extra_state_attributes.update(self._settings)
+        timers = self.turn_on_off_listener.auto_reset_manual_control_timers
+        extra_state_attributes["autoreset_time_remaining"] = {
+            light: time
+            for light in lights
+            if (timer := timers.get(light)) and (time := timer.remaining_time()) > 0
+        }
         return extra_state_attributes
 
     def create_context(
@@ -1000,6 +1243,93 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
             context=self.create_context("interval"),
         )
 
+    # For breaking changes, check out
+    # homeassistant.components.light.async_setup.async_handle_light_on_service
+    def _parse_service_data(
+        self,
+        light: str,
+        service_data: dict[str],
+        prefer_rgb_color: bool | None = None,
+    ) -> dict[str]:
+        def pop_keys_with_none(data):
+            new_data = {}
+            for key, val in data.items():
+                if val is not None:
+                    new_data[key] = val
+            return new_data
+
+        def remove_color_attributes(data):
+            for attr in COLOR_ATTRS:
+                if attr in service_data and attr != ATTR_COLOR_TEMP_KELVIN:
+                    _LOGGER.debug("Remove color attr %s from service data", attr)
+                    service_data[attr] = None
+
+        def build_with_supported(data, features):
+            if not prefer_rgb_color and ATTR_COLOR_TEMP_KELVIN in features:
+                if ATTR_COLOR_TEMP_KELVIN in data:
+                    remove_color_attributes(data)
+            elif prefer_rgb_color is False:
+                _LOGGER.debug(
+                    "%s: 'prefer_rgb_color: false' but light %s does not support color_temp."
+                    " Using rgb_color to build service data instead...",
+                    self._name,
+                    light,
+                )
+                service_data.pop(ATTR_COLOR_TEMP_KELVIN)
+            elif prefer_rgb_color:
+                color_attrs_in_data = {k for k, _ in COLOR_ATTRS.keys() ^ data.keys()}
+                if supports_colors and color_attrs_in_data:
+                    _LOGGER.debug(
+                        "%s: 'prefer_rgb_color: true', using rgb_color for light %s",
+                        self._name,
+                        light,
+                    )
+                    service_data.pop(ATTR_COLOR_TEMP_KELVIN)
+                elif ATTR_COLOR_TEMP_KELVIN in data:
+                    _LOGGER.debug(
+                        "%s: 'prefer_rgb_color: true' but light %s does not support rgb."
+                        " Using color temp to build service data instead...",
+                        self._name,
+                        light,
+                    )
+                    remove_color_attributes(data)
+                else:
+                    _LOGGER.error(ATTR_COLOR_TEMP_KELVIN + " not in service data")
+            for attr, val in data.items():
+                if attr not in COLOR_ATTRS and attr not in features:
+                    _LOGGER.debug("pop unsupported %s val %s", attr, val)
+                    data[attr] = None
+            return data
+
+        _LOGGER.debug("%s: Parsing service data from %s", self._name, service_data)
+        features, supports_colors = _supported_features(self.hass, light)
+        _LOGGER.debug(
+            "%s: Light %s supports the features: %s", self._name, light, features
+        )
+        # Remove unsupported features
+        service_data = build_with_supported(service_data, features)
+        # Ensure no key: None pair exists.
+        service_data = pop_keys_with_none(service_data)
+        if ATTR_COLOR_TEMP_KELVIN in service_data:
+            # Ensure supported max/min color temp is respected.
+            service_data[ATTR_COLOR_TEMP_KELVIN] = max(
+                min(
+                    service_data[ATTR_COLOR_TEMP_KELVIN],
+                    features[ATTR_MAX_COLOR_TEMP_KELVIN],
+                ),
+                features[ATTR_MIN_COLOR_TEMP_KELVIN],
+            )
+        # Validate with hass's own schema.
+        service_data = vol.Schema(ENTITY_LIGHT_TURN_ON_SCHEMA)(service_data)
+        service_data.update({ATTR_ENTITY_ID: light})
+        _LOGGER.debug(
+            "%s: Built service_data supported by light %s. service_data: %s",
+            self._name,
+            light,
+            service_data,
+        )
+        return service_data
+
     async def _adapt_light(
         self,
         light: str,
@@ -1010,73 +1340,52 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
         force: bool = False,
         context: Context | None = None,
     ) -> None:
+        assert context
+        _LOGGER.debug("%s: Precheck before adapting lights", self._name)
         lock = self._locks.get(light)
         if lock is not None and lock.locked():
             _LOGGER.debug("%s: '%s' is locked", self._name, light)
             return
-        service_data = {ATTR_ENTITY_ID: light}
-        features = _supported_features(self.hass, light)
-
-        if transition is None:
-            transition = self._transition
-        if adapt_brightness is None:
-            adapt_brightness = self.adapt_brightness_switch.is_on
-        if adapt_color is None:
-            adapt_color = self.adapt_color_switch.is_on
-        if prefer_rgb_color is None:
-            prefer_rgb_color = self._prefer_rgb_color
-
-        # Check transition == 0 to fix #378
-        if "transition" in features and transition > 0:
-            service_data[ATTR_TRANSITION] = transition
 
         # The switch might be off and not have _settings set.
         self._settings = self._sun_light_settings.get_settings(
             self.sleep_mode_switch.is_on, transition
         )
-
-        if "brightness" in features and adapt_brightness:
-            brightness = round(255 * self._settings["brightness_pct"] / 100)
-            service_data[ATTR_BRIGHTNESS] = brightness
-
-        sleep_rgb = (
-            self.sleep_mode_switch.is_on
-            and self._sun_light_settings.sleep_rgb_or_color_temp == "rgb_color"
+        if prefer_rgb_color is None:
+            if self.sleep_mode_switch.is_on:
+                prefer_rgb_color = (
+                    self._sun_light_settings.sleep_rgb_or_color_temp == "rgb_color"
+                )
+            else:
+                prefer_rgb_color = self._prefer_rgb_color
+        service_data = self._parse_service_data(
+            light,
+            {
+                ATTR_TRANSITION: transition or self._transition,
+                ATTR_BRIGHTNESS: (
+                    round(255 * self._settings[ATTR_BRIGHTNESS_PCT] / 100)
+                    if adapt_brightness is not False
+                    else None
+                ),
+                ATTR_COLOR_TEMP_KELVIN: self._settings[ATTR_COLOR_TEMP_KELVIN]
+                if adapt_color is not False
+                else None,
+                ATTR_RGB_COLOR: list(self._settings[ATTR_RGB_COLOR])
+                if adapt_color is not False
+                else None,
+            },
+            prefer_rgb_color,
         )
+        # Check if service data differs from the last. See #80.
+        listener = self.turn_on_off_listener
+        last_service_data = listener.last_service_data.get(light)
+        ignore_fields = {ATTR_TRANSITION}
         if (
-            "color_temp" in features
-            and adapt_color
-            and not (prefer_rgb_color and "color" in features)
-            and not (sleep_rgb and "color" in features)
+            not force
+            and last_service_data
+            and {k for k, _ in last_service_data.items() ^ service_data.items()}
+            == ignore_fields
         ):
-            _LOGGER.debug("%s: Setting color_temp of light %s", self._name, light)
-            attributes = self.hass.states.get(light).attributes
-            min_kelvin = attributes["min_color_temp_kelvin"]
-            max_kelvin = attributes["max_color_temp_kelvin"]
-            color_temp_kelvin = self._settings["color_temp_kelvin"]
-            color_temp_kelvin = max(min(color_temp_kelvin, max_kelvin), min_kelvin)
-            service_data[ATTR_COLOR_TEMP_KELVIN] = color_temp_kelvin
-        elif "color" in features and adapt_color:
-            _LOGGER.debug("%s: Setting rgb_color of light %s", self._name, light)
-            service_data[ATTR_RGB_COLOR] = self._settings["rgb_color"]
-
-        context = context or self.create_context("adapt_lights")
-        if (
-            self._take_over_control
-            and self._detect_non_ha_changes
-            and not force
-            and await self.turn_on_off_listener.significant_change(
-                self,
-                light,
-                adapt_brightness,
-                adapt_color,
-                context,
-            )
-        ):
-            return
-        # See #80. Doesn't check if transitions differ but it does the job.
-        last_service_data = self.turn_on_off_listener.last_service_data
-        if last_service_data.get(light) == service_data:
             _LOGGER.debug(
                 "%s: Cancelling adapt to light %s, there's no new values to set (context.id='%s')",
                 self._name,
@@ -1084,8 +1393,9 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                 context.id,
             )
             return
-        else:
-            self.turn_on_off_listener.last_service_data[light] = service_data
+        listener.last_service_data[light] = service_data
+
+        context = context or self.create_context("adapt_lights")
 
         async def turn_on(service_data):
             _LOGGER.debug(
@@ -1140,22 +1450,30 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
 
         if lights is None:
             lights = self._lights
-
-        if not force and self._only_once:
+        if force:
+            await self._update_manual_control_and_maybe_adapt(
+                lights, transition, force, context
+            )
             return
-
+        if self._only_once:
+            return
         filtered_lights = []
         for light in lights:
             # Don't adapt lights that haven't finished prior transitions.
-            if force or not self.turn_on_off_listener.transition_timers.get(light):
+            timer = self.turn_on_off_listener.transition_timers.get(light)
+            if timer is not None and timer.is_running():
+                _LOGGER.debug(
+                    "%s: Skip adapting light '%s': it's still transitioning from the last.",
+                    self._name,
+                    light,
+                )
+            else:
                 filtered_lights.append(light)
+        await self._update_manual_control_and_maybe_adapt(
+            filtered_lights, transition, force, context
+        )
 
-        if not filtered_lights:
-            return
-
-        await self._adapt_lights(filtered_lights, transition, force, context)
-
-    async def _adapt_lights(
+    async def _update_manual_control_and_maybe_adapt(
         self,
         lights: list[str],
         transition: int | None,
@@ -1164,34 +1482,53 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
     ) -> None:
         assert context is not None
         _LOGGER.debug(
-            "%s: '_adapt_lights(%s, %s, force=%s, context.id=%s)' called",
+            "%s: '_update_manual_control_and_maybe_adapt(%s, %s, force=%s, context.id=%s)' called",
             self.name,
             lights,
             transition,
             force,
             context.id,
         )
+
+        adapt_brightness = self.adapt_brightness_switch.is_on
+        adapt_color = self.adapt_color_switch.is_on
+
         for light in lights:
             if not is_on(self.hass, light):
                 continue
-            if (
-                self._take_over_control
-                and self.turn_on_off_listener.is_manually_controlled(
+
+            manually_controlled = self.turn_on_off_listener.is_manually_controlled(
+                self,
+                light,
+                force,
+                adapt_brightness,
+                adapt_color,
+            )
+
+            significant_change = (
+                self._detect_non_ha_changes
+                and not force
+                and await self.turn_on_off_listener.significant_change(
                     self,
                     light,
-                    force,
-                    self.adapt_brightness_switch.is_on,
-                    self.adapt_color_switch.is_on,
+                    adapt_brightness,
+                    adapt_color,
+                    context,
                 )
-            ):
-                _LOGGER.debug(
-                    "%s: '%s' is being manually controlled, stop adapting, context.id=%s.",
-                    self._name,
-                    light,
-                    context.id,
-                )
-                continue
-            await self._adapt_light(light, transition, force=force, context=context)
+            )
+
+            if self._take_over_control and (manually_controlled or significant_change):
+                if manually_controlled:
+                    _LOGGER.debug(
+                        "%s: '%s' is being manually controlled, stop adapting, context.id=%s.",
+                        self._name,
+                        light,
+                        context.id,
+                    )
+                else:
+                    _fire_manual_control_event(self, light, context)
+            else:
+                await self._adapt_light(light, transition, force=force, context=context)
 
     async def _sleep_mode_switch_state_event(self, event: Event) -> None:
         if not match_switch_state_event(event, (STATE_ON, STATE_OFF)):
@@ -1344,7 +1681,10 @@ class SunLightSettings:
 
     name: str
     astral_location: astral.Location
+    adapt_brightness_until_sleep: bool
+    adapt_color_temp_until_sleep: bool
     adapt_until_sleep: bool
+    flat_limits: bool
     max_brightness: int
     max_color_temp: int
     min_brightness: int
@@ -1484,8 +1824,18 @@ class SunLightSettings:
             return self.sleep_brightness
         if percent > 0:
             return self.max_brightness
+        if self.adapt_until_sleep and self.adapt_brightness_until_sleep and percent < 0:
+            delta_brightness = abs(self.min_brightness - self.sleep_brightness)
+            return (delta_brightness * abs(1 + percent)) + self.sleep_brightness
         delta_brightness = self.max_brightness - self.min_brightness
         percent = 1 + percent
+        if self.flat_limits:
+            if percent * 100 > self.max_brightness:
+                return self.max_brightness
+            elif percent * 100 < self.min_brightness:
+                return self.min_brightness
+            return percent * 100
+        delta_brightness = self.max_brightness - self.min_brightness
         return (delta_brightness * percent) + self.min_brightness
 
     def calc_color_temp_kelvin(self, percent: float) -> int:
@@ -1496,7 +1846,7 @@ class SunLightSettings:
             return 5 * round(ct / 5)  # round to nearest 5
         if percent == 0 or not self.adapt_until_sleep:
             return self.min_color_temp
-        if self.adapt_until_sleep and percent < 0:
+        if self.adapt_until_sleep and self.adapt_color_temp_until_sleep and percent < 0:
             delta = abs(self.min_color_temp - self.sleep_color_temp)
             ct = (delta * abs(1 + percent)) + self.sleep_color_temp
             return 5 * round(ct / 5)  # round to nearest 5
@@ -1565,6 +1915,10 @@ class TurnOnOffListener:
         # Track light transitions
         self.transition_timers: dict[str, _AsyncSingleShotTimer] = {}
 
+        # When a state is different `max_cnt_significant_changes` times in a row,
+        # mark it as manually_controlled.
+        self.max_cnt_significant_changes = 2
+
         self.remove_listener = self.hass.bus.async_listen(
             EVENT_CALL_SERVICE, self.turn_on_off_event_listener
         )
@@ -1585,7 +1939,7 @@ class TurnOnOffListener:
                 timer.cancel()
                 timers_dict.pop(light)
             else:  # Timer object already exists, just update the delay and restart it
-                timer.delay = delay
+                timer.delay = delay  # pylint: disable=protected-access
                 timer.start()
         elif delay is not None:  # Timer object does not exist, create it
             timer = _AsyncSingleShotTimer(delay, reset_coroutine)
@@ -1594,33 +1948,28 @@ class TurnOnOffListener:
 
     def start_transition_timer(self, light: str) -> None:
         """Mark a light as manually controlled."""
-        _LOGGER.debug("Start transition timer for %s", light)
-        last_service_data = self.last_service_data
-        if (
-            not last_service_data
-            or light not in last_service_data
-            or ATTR_TRANSITION not in last_service_data[light]
-        ):
+        last_service_data = self.last_service_data.get(light)
+        if not last_service_data:
+            _LOGGER.debug("This should not ever happen. Please report to the devs.")
             return
-
-        delay = last_service_data[light][ATTR_TRANSITION]
+        last_transition = last_service_data.get(ATTR_TRANSITION)
+        if not last_transition:
+            _LOGGER.debug(
+                "No transition in last adapt for light %s, continuing...", light
+            )
+            return
+        _LOGGER.debug(
+            "Start transition timer of %s seconds for light %s", last_transition, light
+        )
 
         async def reset():
+            ValueError("TEST")
             _LOGGER.debug(
                 "Transition finished for light %s",
                 light,
             )
-            switches = _get_switches_with_lights(self.hass, [light])
-            for switch in switches:
-                if not switch.is_on:
-                    continue
-                await switch._update_attrs_and_maybe_adapt_lights(
-                    [light],
-                    force=False,
-                    context=switch.create_context("transit"),
-                )
 
-        self._handle_timer(light, self.transition_timers, delay, reset)
+        self._handle_timer(light, self.transition_timers, last_transition, reset)
 
     def set_auto_reset_manual_control_times(self, lights: list[str], time: float):
         """Set the time after which the lights are automatically reset."""
@@ -1743,7 +2092,7 @@ class TurnOnOffListener:
     async def state_changed_event_listener(self, event: Event) -> None:
         """Track 'state_changed' events."""
         entity_id = event.data.get(ATTR_ENTITY_ID, "")
-        if entity_id not in self.lights or entity_id.split(".")[0] != LIGHT_DOMAIN:
+        if entity_id not in self.lights:
             return
 
         new_state = event.data.get("new_state")
@@ -1788,6 +2137,10 @@ class TurnOnOffListener:
                         entity_id,
                     )
                     self.last_state_change[entity_id] = [new_state]
+                    _LOGGER.debug(
+                        "Last transition: %s",
+                        self.last_service_data[entity_id].get(ATTR_TRANSITION),
+                    )
                     self.start_transition_timer(entity_id)
             elif old_state is not None:
                 self.last_state_change[entity_id].append(new_state)
@@ -1818,7 +2171,7 @@ class TurnOnOffListener:
             ):
                 # Light was already on and 'light.turn_on' was not called by
                 # the adaptive_lighting integration.
-                manual_control = self.mark_as_manual_control(light)
+                manual_control = True
                 _fire_manual_control_event(switch, light, turn_on_event.context)
                 _LOGGER.debug(
                     "'%s' was already on and 'light.turn_on' was not called by the"
@@ -1886,8 +2239,6 @@ class TurnOnOffListener:
                     light,
                     context.id,
                 )
-                self.mark_as_manual_control(light)
-                _fire_manual_control_event(switch, light, context, is_async=False)
                 return True
         _LOGGER.debug(
             "%s: Light '%s' correctly matches our last adapt's service data, continuing..."
@@ -2030,3 +2381,10 @@ class _AsyncSingleShotTimer:
         if self.task:
             self.task.cancel()
             self.callback = None
+
+    def remaining_time(self):
+        """Return the remaining time before the timer expires."""
+        if self.start_time is not None:
+            elapsed_time = (dt_util.utcnow() - self.start_time).total_seconds()
+            return max(0, self.delay - elapsed_time)
+        return 0
