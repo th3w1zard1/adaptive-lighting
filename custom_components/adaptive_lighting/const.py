@@ -1,5 +1,6 @@
 """Constants for the Adaptive Lighting integration."""
 
+
 from homeassistant.components.light import (
     ATTR_TRANSITION,
     LIGHT_TURN_ON_SCHEMA,
@@ -24,148 +25,75 @@ DOMAIN = "adaptive_lighting"
 SUN_EVENT_NOON = "solar_noon"
 SUN_EVENT_MIDNIGHT = "solar_midnight"
 
-DOCS = {CONF_ENTITY_ID: "Entity ID of the switch. 📝"}
-
-
 CONF_NAME, DEFAULT_NAME = "name", "default"
-DOCS[CONF_NAME] = "Display name for this switch. 📝"
-
 CONF_LIGHTS, DEFAULT_LIGHTS = "lights", []
-DOCS[CONF_LIGHTS] = "List of light entity_ids to be controlled (may be empty). 🌟"
-
 CONF_DETECT_NON_HA_CHANGES, DEFAULT_DETECT_NON_HA_CHANGES = (
     "detect_non_ha_changes",
     False,
 )
-DOCS[CONF_DETECT_NON_HA_CHANGES] = (
-    "Detect non-`light.turn_on` state changes and stop adapting lights. "
-    "Requires `take_over_control`. 🕵️"
-)
-
 CONF_INCLUDE_CONFIG_IN_ATTRIBUTES, DEFAULT_INCLUDE_CONFIG_IN_ATTRIBUTES = (
     "include_config_in_attributes",
     False,
 )
-DOCS[CONF_INCLUDE_CONFIG_IN_ATTRIBUTES] = (
-    "Show all options as attributes on the switch in "
-    "Home Assistant when set to `true`. 📝"
-)
-
 CONF_INITIAL_TRANSITION, DEFAULT_INITIAL_TRANSITION = "initial_transition", 1
-DOCS[CONF_INITIAL_TRANSITION] = (
-    "Duration of the first transition when lights turn "
-    "from `off` to `on` in seconds. ⏲️"
-)
-
 CONF_SLEEP_TRANSITION, DEFAULT_SLEEP_TRANSITION = "sleep_transition", 1
-DOCS[CONF_SLEEP_TRANSITION] = (
-    'Duration of transition when "sleep mode" is toggled ' "in seconds. 😴"
-)
-
 CONF_INTERVAL, DEFAULT_INTERVAL = "interval", 90
-DOCS[CONF_INTERVAL] = "Frequency to adapt the lights, in seconds. 🔄"
-
 CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS = "max_brightness", 100
-DOCS[CONF_MAX_BRIGHTNESS] = "Maximum brightness percentage. 💡"
-
 CONF_MAX_COLOR_TEMP, DEFAULT_MAX_COLOR_TEMP = "max_color_temp", 5500
-DOCS[CONF_MAX_COLOR_TEMP] = "Coldest color temperature in Kelvin. ❄️"
-
 CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS = "min_brightness", 1
-DOCS[CONF_MIN_BRIGHTNESS] = "Minimum brightness percentage. 💡"
-
 CONF_MIN_COLOR_TEMP, DEFAULT_MIN_COLOR_TEMP = "min_color_temp", 2000
-DOCS[CONF_MIN_COLOR_TEMP] = "Warmest color temperature in Kelvin. 🔥"
-
 CONF_FLAT_LIMITS, DEFAULT_FLAT_LIMITS = "flat_limits", False
-DOCS[CONF_FLAT_LIMITS] = (
-    "When True, will not calculate between the"
-    " max/min supported limits of your light. Example: when adapting brightness to 50% while "
-    + CONF_MAX_BRIGHTNESS
-    + " is set to 80%, Adaptive Lighting will use 80% instead of 90%"
-)
-
 CONF_ONLY_ONCE, DEFAULT_ONLY_ONCE = "only_once", False
-DOCS[CONF_ONLY_ONCE] = (
-    "Adapt lights only when they are turned on (`true`) or keep adapting them "
-    "(`false`). 🔄"
-)
-
 CONF_PREFER_RGB_COLOR, DEFAULT_PREFER_RGB_COLOR = "prefer_rgb_color", False
-DOCS[CONF_PREFER_RGB_COLOR] = (
-    "Whether to prefer RGB color adjustment over "
-    "light color temperature when possible. 🌈"
-)
-
 CONF_SEPARATE_TURN_ON_COMMANDS, DEFAULT_SEPARATE_TURN_ON_COMMANDS = (
     "separate_turn_on_commands",
     False,
 )
-DOCS[CONF_SEPARATE_TURN_ON_COMMANDS] = (
-    "Use separate `light.turn_on` calls for color and brightness, needed for "
-    "some light types. 🔀"
-)
-
 CONF_SLEEP_BRIGHTNESS, DEFAULT_SLEEP_BRIGHTNESS = "sleep_brightness", 1
-DOCS[CONF_SLEEP_BRIGHTNESS] = "Brightness percentage of lights in sleep mode. 😴"
-
 CONF_SLEEP_COLOR_TEMP, DEFAULT_SLEEP_COLOR_TEMP = "sleep_color_temp", 1000
-DOCS[CONF_SLEEP_COLOR_TEMP] = (
-    "Color temperature in sleep mode (used when `sleep_rgb_or_color_temp` is "
-    "`color_temp`) in Kelvin. 😴"
-)
-
 CONF_SLEEP_RGB_COLOR, DEFAULT_SLEEP_RGB_COLOR = "sleep_rgb_color", [255, 56, 0]
-DOCS[CONF_SLEEP_RGB_COLOR] = (
-    "RGB color in sleep mode (used when " '`sleep_rgb_or_color_temp` is "rgb_color"). 🌈'
-)
-
 CONF_SLEEP_RGB_OR_COLOR_TEMP, DEFAULT_SLEEP_RGB_OR_COLOR_TEMP = (
     "sleep_rgb_or_color_temp",
     "color_temp",
 )
-DOCS[CONF_SLEEP_RGB_OR_COLOR_TEMP] = (
-    'Use either `"rgb_color"` or `"color_temp"` ' "in sleep mode. 🌙"
-)
-
 CONF_SUNRISE_OFFSET, DEFAULT_SUNRISE_OFFSET = "sunrise_offset", 0
-DOCS[CONF_SUNRISE_OFFSET] = (
-    "Adjust sunrise time with a positive or negative offset " "in seconds. ⏰"
-)
-
 CONF_SUNRISE_TIME = "sunrise_time"
-DOCS[CONF_SUNRISE_TIME] = "Set a fixed time (HH:MM:SS) for sunrise. 🌅"
-
 CONF_MAX_SUNRISE_TIME = "max_sunrise_time"
-DOCS[CONF_MAX_SUNRISE_TIME] = (
-    "Set the latest virtual sunrise time (HH:MM:SS), allowing"
-    " for earlier real sunrises. 🌅"
-)
-
 CONF_SUNSET_OFFSET, DEFAULT_SUNSET_OFFSET = "sunset_offset", 0
-DOCS[
-    CONF_SUNSET_OFFSET
-] = "Adjust sunset time with a positive or negative offset in seconds. ⏰"
-
 CONF_SUNSET_TIME = "sunset_time"
-DOCS[CONF_SUNSET_TIME] = "Set a fixed time (HH:MM:SS) for sunset. 🌇"
-
 CONF_MIN_SUNSET_TIME = "min_sunset_time"
-DOCS[CONF_MIN_SUNSET_TIME] = (
-    "Set the earliest virtual sunset time (HH:MM:SS), allowing"
-    " for later real sunsets. 🌇"
-)
-
 CONF_TAKE_OVER_CONTROL, DEFAULT_TAKE_OVER_CONTROL = "take_over_control", True
-DOCS[CONF_TAKE_OVER_CONTROL] = (
-    "Disable Adaptive Lighting if another source calls `light.turn_on` while lights "
-    "are on and being adapted. Note that this calls `homeassistant.update_entity` "
-    "every `interval`! 🔒"
-)
-
 CONF_TRANSITION, DEFAULT_TRANSITION = "transition", 45
-DOCS[CONF_TRANSITION] = "Duration of transition when lights change, in seconds. 🕑"
-
+DOCS = {
+    CONF_ENTITY_ID: "Entity ID of the switch. 📝",
+    CONF_NAME: "Display name for this switch. 📝",
+    CONF_LIGHTS: "List of light entity_ids to be controlled (may be empty). 🌟",
+    CONF_DETECT_NON_HA_CHANGES: "Detect non-`light.turn_on` state changes and stop adapting lights. Requires `take_over_control`. 🕵️",
+    CONF_INCLUDE_CONFIG_IN_ATTRIBUTES: "Show all options as attributes on the switch in Home Assistant when set to `true`. 📝",
+    CONF_INITIAL_TRANSITION: "Duration of the first transition when lights turn from `off` to `on` in seconds. ⏲️",
+    CONF_SLEEP_TRANSITION: 'Duration of transition when "sleep mode" is toggled in seconds. 😴',
+    CONF_INTERVAL: "Frequency to adapt the lights, in seconds. 🔄",
+    CONF_MAX_BRIGHTNESS: "Maximum brightness percentage. 💡",
+    CONF_MAX_COLOR_TEMP: "Coldest color temperature in Kelvin. ❄️",
+    CONF_MIN_BRIGHTNESS: "Minimum brightness percentage. 💡",
+    CONF_MIN_COLOR_TEMP: "Warmest color temperature in Kelvin. 🔥",
+    CONF_FLAT_LIMITS: f"When True, will not calculate between the max/min supported limits of your light. Example: when adapting brightness to 50% while {CONF_MAX_BRIGHTNESS} is set to 80%, Adaptive Lighting will use 80% instead of 90%",
+    CONF_ONLY_ONCE: "Adapt lights only when they are turned on (`true`) or keep adapting them (`false`). 🔄",
+    CONF_PREFER_RGB_COLOR: "Whether to prefer RGB color adjustment over light color temperature when possible. 🌈",
+    CONF_SEPARATE_TURN_ON_COMMANDS: "Use separate `light.turn_on` calls for color and brightness, needed for some light types. 🔀",
+    CONF_SLEEP_BRIGHTNESS: "Brightness percentage of lights in sleep mode. 😴",
+    CONF_SLEEP_COLOR_TEMP: "Color temperature in sleep mode (used when `sleep_rgb_or_color_temp` is `color_temp`) in Kelvin. 😴",
+    CONF_SLEEP_RGB_COLOR: 'RGB color in sleep mode (used when `sleep_rgb_or_color_temp` is "rgb_color"). 🌈',
+    CONF_SLEEP_RGB_OR_COLOR_TEMP: 'Use either `"rgb_color"` or `"color_temp"` in sleep mode. 🌙',
+    CONF_SUNRISE_OFFSET: "Adjust sunrise time with a positive or negative offset in seconds. ⏰",
+    CONF_SUNRISE_TIME: "Set a fixed time (HH:MM:SS) for sunrise. 🌅",
+    CONF_MAX_SUNRISE_TIME: "Set the latest virtual sunrise time (HH:MM:SS), allowing for earlier real sunrises. 🌅",
+    CONF_SUNSET_OFFSET: "Adjust sunset time with a positive or negative offset in seconds. ⏰",
+    CONF_SUNSET_TIME: "Set a fixed time (HH:MM:SS) for sunset. 🌇",
+    CONF_MIN_SUNSET_TIME: "Set the earliest virtual sunset time (HH:MM:SS), allowing for later real sunsets. 🌇",
+    CONF_TAKE_OVER_CONTROL: "Disable Adaptive Lighting if another source calls `light.turn_on` while lights are on and being adapted. Note that this calls `homeassistant.update_entity` every `interval`! 🔒",
+    CONF_TRANSITION: "Duration of transition when lights change, in seconds. 🕑",
+}
 CONF_ADAPT_UNTIL_SLEEP, DEFAULT_ADAPT_UNTIL_SLEEP = (
     "transition_until_sleep",
     False,
@@ -271,9 +199,7 @@ def int_between(min_int, max_int):
 
 
 def replace_zero_with_none(val: int) -> None:
-    if val == 0:
-        return None
-    return val
+    return None if val == 0 else val
 
 
 # Fixes an issue I can't find on github at this moment.
