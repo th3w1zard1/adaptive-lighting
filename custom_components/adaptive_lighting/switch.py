@@ -298,9 +298,7 @@ def create_context(
 
 def is_our_context(context: Context | None) -> bool:
     """Check whether this integration created 'context'."""
-    if context is None:
-        return False
-    return f":{_DOMAIN_SHORT}:" in context.id
+    return False if context is None else f":{_DOMAIN_SHORT}:" in context.id
 
 
 def _split_service_data(service_data, adapt_brightness, adapt_color):
@@ -320,9 +318,7 @@ def _split_service_data(service_data, adapt_brightness, adapt_color):
         service_data_brightness.pop(ATTR_COLOR_TEMP_KELVIN, None)
         service_datas.append(service_data_brightness)
 
-    if not service_datas:  # neither adapt_brightness nor adapt_color
-        return [service_data]
-    return service_datas
+    return [service_data] if not service_datas else service_datas
 
 
 def _get_switches_with_lights(
@@ -741,8 +737,7 @@ def match_switch_state_event(event: Event, from_or_to_state: list[str]):
     new_state = event.data.get("new_state")
     to_state_match = new_state is not None and new_state.state in from_or_to_state
 
-    match = from_state_match or to_state_match
-    return match
+    return from_state_match or to_state_match
 
 
 def _expand_light_groups(hass: HomeAssistant, lights: list[str]) -> list[str]:
@@ -1151,8 +1146,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
 
         self.remove_listeners.extend([remove_interval, remove_sleep])
 
-        lights = self._lights
-        if lights:
+        if lights := self._lights:
             remove_state = async_track_state_change_event(
                 self.hass, lights, self._light_event
             )
@@ -1294,7 +1288,7 @@ class AdaptiveSwitch(SwitchEntity, RestoreEntity):
                     )
                     remove_color_attributes(data)
                 else:
-                    _LOGGER.error(ATTR_COLOR_TEMP_KELVIN + " not in service data")
+                    _LOGGER.error(f"{ATTR_COLOR_TEMP_KELVIN} not in service data")
             for attr, val in data.items():
                 if attr not in COLOR_ATTRS and attr not in features:
                     _LOGGER.debug("pop unsupported %s val %s", attr, val)
@@ -1815,8 +1809,7 @@ class SunLightSettings:
             else (next_ts, prev_ts)
         )
         k = 1 if next_event in (SUN_EVENT_SUNSET, SUN_EVENT_NOON) else -1
-        percentage = (0 - k) * ((target_ts - h) / (h - x)) ** 2 + k
-        return percentage
+        return (0 - k) * ((target_ts - h) / (h - x)) ** 2 + k
 
     def calc_brightness_pct(self, percent: float, is_sleep: bool) -> float:
         """Calculate the brightness in %."""
@@ -1846,7 +1839,7 @@ class SunLightSettings:
             return 5 * round(ct / 5)  # round to nearest 5
         if percent == 0 or not self.adapt_until_sleep:
             return self.min_color_temp
-        if self.adapt_until_sleep and self.adapt_color_temp_until_sleep and percent < 0:
+        if self.adapt_color_temp_until_sleep and percent < 0:
             delta = abs(self.min_color_temp - self.sleep_color_temp)
             ct = (delta * abs(1 + percent)) + self.sleep_color_temp
             return 5 * round(ct / 5)  # round to nearest 5
@@ -2042,9 +2035,11 @@ class TurnOnOffListener:
             entity_ids = []
             for area_id in area_ids:
                 area_entity_ids = area_entities(self.hass, area_id)
-                for entity_id in area_entity_ids:
-                    if entity_id.startswith(LIGHT_DOMAIN):
-                        entity_ids.append(entity_id)
+                entity_ids.extend(
+                    entity_id
+                    for entity_id in area_entity_ids
+                    if entity_id.startswith(LIGHT_DOMAIN)
+                )
                 _LOGGER.debug(
                     "Found entity_ids '%s' for area_id '%s'", entity_ids, area_id
                 )
@@ -2054,7 +2049,7 @@ class TurnOnOffListener:
             )
             return
 
-        if not any(eid in self.lights for eid in entity_ids):
+        if all(eid not in self.lights for eid in entity_ids):
             return
 
         if service == SERVICE_TURN_OFF:
@@ -2229,11 +2224,10 @@ class TurnOnOffListener:
                 light,
                 refreshed_state,
             )
-            changed = compare_to(
+            if changed := compare_to(
                 old_attributes=last_service_data,
                 new_attributes=refreshed_state.attributes,
-            )
-            if changed:
+            ):
                 _LOGGER.debug(
                     "State of '%s' didn't change wrt 'last_service_data' (context.id=%s)",
                     light,
@@ -2334,18 +2328,7 @@ class TurnOnOffListener:
                 return True
             delay = TURNING_OFF_DELAY  # next time only wait this long
 
-        if transition is not None:
-            # Always ignore when there's a 'turn_off' transition.
-            # Because it seems like HA cannot detect whether a light is
-            # transitioning into 'off'. Maybe needs some discussion/input?
-            return True
-
-        # Now we assume that the lights are still on and they were intended
-        # to be on. In case this still gives problems for some, we might
-        # choose to **only** adapt on 'light.turn_on' events and ignore
-        # other 'off' → 'on' state switches resulting from polling. That
-        # would mean we 'return True' here.
-        return False
+        return transition is not None
 
 
 class _AsyncSingleShotTimer:

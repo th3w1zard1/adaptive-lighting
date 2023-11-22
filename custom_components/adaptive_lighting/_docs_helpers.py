@@ -76,12 +76,11 @@ def generate_config_markdown_table():
 
 
 def _schema_to_dict(schema: vol.Schema) -> dict[str, tuple[Any, Any]]:
-    result = {}
-    for key, value in schema.schema.items():
-        if isinstance(key, vol.Optional):
-            default_value = key.default
-            result[key.schema] = (default_value, value)
-    return result
+    return {
+        key.schema: (key.default, value)
+        for key, value in schema.schema.items()
+        if isinstance(key, vol.Optional)
+    }
 
 
 def _generate_service_markdown_table(

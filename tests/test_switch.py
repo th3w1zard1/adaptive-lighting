@@ -659,10 +659,10 @@ async def test_manual_control(hass):
 
     # Check that when no lights are specified, all are reset
     await change_manual_control(True, {CONF_LIGHTS: switch._lights})
-    assert all([manual_control[eid] for eid in switch._lights])
+    assert all(manual_control[eid] for eid in switch._lights)
     # do not pass "lights" so reset all
     await change_manual_control(False, {})
-    assert all([not manual_control[eid] for eid in switch._lights])
+    assert all(not manual_control[eid] for eid in switch._lights)
 
 
 @pytest.mark.dependency(depends=[*GLOBAL_TEST_DEPENDENCIES, "test_manual_control"])
@@ -1118,33 +1118,31 @@ async def test_unload_switch(hass):
 async def test_restore_off_state(hass, state):
     """Test that the 'off' and 'on' states are propoperly restored."""
     with patch(
-        "homeassistant.helpers.restore_state.RestoreEntity.async_get_last_state",
-        return_value=State(ENTITY_SWITCH, state) if state is not None else None,
-    ):
+            "homeassistant.helpers.restore_state.RestoreEntity.async_get_last_state",
+            return_value=State(ENTITY_SWITCH, state) if state is not None else None,
+        ):
         await hass.async_start()
         await hass.async_block_till_done()
         _, switch = await setup_switch(hass, {})
-        if state == STATE_ON:
+        if state == STATE_ON or state != STATE_OFF and state is None:
             assert switch.is_on
         elif state == STATE_OFF:
             assert not switch.is_on
-        elif state is None:
-            assert switch.is_on
-
         for _switch, initial_state in [
             (switch.sleep_mode_switch, False),
             (switch.adapt_brightness_switch, True),
             (switch.adapt_color_switch, True),
         ]:
-            if state == STATE_ON:
+            if (
+                state != STATE_ON
+                and state != STATE_OFF
+                and state is None
+                and initial_state
+                or state == STATE_ON
+            ):
                 assert _switch.is_on
-            elif state == STATE_OFF:
+            elif state != STATE_OFF and state is None or state == STATE_OFF:
                 assert not _switch.is_on
-            elif state is None:
-                if initial_state:
-                    assert _switch.is_on
-                else:
-                    assert not _switch.is_on
 
 
 @pytest.mark.xfail(reason="Offset is larger than half a day")

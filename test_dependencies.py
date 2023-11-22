@@ -4,7 +4,7 @@ with open("core/requirements_test_all.txt") as f:
 components = []
 packages = []
 deps = {}
-for i, line in enumerate(lines):
+for line in lines:
     line = line.strip()
     if line.startswith("# homeassistant."):
         component = line.split("# homeassistant.")[1]
